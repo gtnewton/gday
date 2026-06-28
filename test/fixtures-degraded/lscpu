@@ -1,0 +1,10 @@
+Architecture:            x86_64
+  CPU op-mode(s):        32-bit, 64-bit
+  Address sizes:         46 bits physical, 48 bits virtual
+CPU(s):                  16
+Vendor ID:               GenuineIntel
+  Model name:            12th Gen Intel(R) Core(TM) i7-12700K
+    CPU family:          6
+    Socket(s):           1
+    Core(s) per socket:  8
+    Thread(s) per core:  2

@@ -1,0 +1,10 @@
+Reading package lists...
+Building dependency tree...
+The following packages will be upgraded:
+  curl libcurl4 tzdata vim-common vim-tiny
+Inst curl [8.5.0-2] (8.5.0-2ubuntu1 Ubuntu:24.04)
+Inst libcurl4 [8.5.0-2] (8.5.0-2ubuntu1 Ubuntu:24.04)
+Inst tzdata [2024a-1] (2024b-1 Ubuntu:24.04)
+Inst vim-common [9.1.0016] (9.1.0100 Ubuntu:24.04)
+Inst vim-tiny [9.1.0016] (9.1.0100 Ubuntu:24.04)
+Conf curl (8.5.0-2ubuntu1 Ubuntu:24.04)

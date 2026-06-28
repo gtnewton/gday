@@ -1,0 +1,10 @@
+# dmidecode 3.5
+Getting SMBIOS data from sysfs.
+
+Handle 0x0002, DMI type 2, 15 bytes
+Base Board Information
+	Manufacturer: Dell Inc.
+	Product Name: 0R6P3W
+	Version: A00
+	Serial Number: /TESTSN01/TESTBB02/
+	Asset Tag: Not Specified

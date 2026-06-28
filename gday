@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# gday — login MOTD generator (CLAUDE.md). Print/assemble the banner, rebuild
+# tiers, write /etc/motd. Probe failures never abort; only a failed requested
+# operation (e.g. cannot write /etc/motd) exits non-zero (§5).
+set -euo pipefail
+
+readonly GDAY_VERSION='0.1.0-dev'
+
+# --- path resolution: dev tree first, installed layout second ---------------
+gday::_resolve_lib() {
+  local self src dir
+  src=${BASH_SOURCE[0]}
+  while [[ -h $src ]]; do
+    dir=$(cd -P "$(dirname "$src")" && pwd)
+    src=$(readlink "$src"); [[ $src != /* ]] && src=$dir/$src
+  done
+  self=$(cd -P "$(dirname "$src")" && pwd)
+  if [[ -d $self/lib && -r $self/lib/render.sh ]]; then
+    printf '%s/lib' "$self"            # running from the source tree
+  else
+    printf '/usr/local/lib/gday'       # installed layout (§8)
+  fi
+}
+
+GDAY_LIB=${GDAY_LIB:-$(gday::_resolve_lib)}
+GDAY_VAR=${GDAY_VAR:-/var/lib/gday}
+GDAY_MOTD=${GDAY_MOTD:-/etc/motd}
+
+for _lib in render detect hardware banner os disk status packages updates; do
+  # shellcheck source=/dev/null
+  source "$GDAY_LIB/${_lib}.sh"
+done
+unset _lib
+
+# --- static tier ------------------------------------------------------------
+# Probe expensive/stable facts and pre-render one cache file per section (§6,§7).
+# Each cache is written atomically (mktemp + mv) at 0644 (§7, §17).
+gday::_write_cache() {
+  local name=$1 fn=$2 tmp
+  tmp=$(mktemp "${GDAY_VAR}/.${name}.XXXXXX") || return 1
+  if "$fn" > "$tmp"; then
+    chmod 0644 "$tmp"
+    mv -f "$tmp" "$GDAY_VAR/${name}.txt"
+  else
+    rm -f "$tmp"
+  fi
+}
+
+gday::build_static() {
+  gday::detect
+  mkdir -p "$GDAY_VAR"
+  gday::packages_build              # writes pkgs.txt (full list)
+  gday::_write_cache banner   gday::banner_section
+  gday::_write_cache hardware gday::hardware_section
+  gday::_write_cache packages gday::packages_section
+}
+
+# --- assemble ---------------------------------------------------------------
+# Read static caches + live sections, in fixed order, to stdout (§9). A missing
+# cache omits its section; assembly always continues (§5).
+#
+# Section isolation (§5) is enforced here: every section runs via gday::_emit,
+# which invokes it in a `|| true` list. That deliberately suspends `set -e` for
+# the whole section subtree, so any probe failure inside emits what it can and
+# can NEVER abort assembly. This is the core reliability guarantee, implemented
+# at one chokepoint rather than relying on every probe returning zero.
+gday::_emit() { "$@" || true; }
+
+gday::_cached() {
+  local name=$1 fn=$2
+  if [[ -r $GDAY_VAR/${name}.txt ]]; then
+    cat -- "$GDAY_VAR/${name}.txt" || true
+  else
+    gday::_emit "$fn"                # preview before first static run
+  fi
+}
+
+gday::footer() {
+  render::rule
+  printf "g'day · generated %s\n" "$(date '+%Y-%m-%d %H:%M')"
+}
+
+gday::assemble() {
+  gday::detect
+  gday::_cached banner   gday::banner_section ; printf '\n'
+  gday::_cached hardware gday::hardware_section ; printf '\n'
+  gday::_emit gday::disk_section   ; printf '\n'
+  gday::_emit gday::os_section     ; printf '\n'
+  gday::_emit gday::status_section ; printf '\n'
+  gday::_cached packages gday::packages_section ; printf '\n'
+  gday::footer
+}
+
+# --- single-section debug affordance (§19) ----------------------------------
+gday::one_section() {
+  local name=$1
+  gday::detect
+  case $name in
+    banner)   gday::_emit gday::banner_section ;;
+    hardware) gday::_emit gday::hardware_section ;;
+    disk)     gday::_emit gday::disk_section ;;
+    os)       gday::_emit gday::os_section ;;
+    status)   gday::_emit gday::status_section ;;
+    packages) gday::_emit gday::packages_section ;;
+    *) printf 'gday: unknown section %q\n' "$name" >&2; return 2 ;;
+  esac
+}
+
+# --- write /etc/motd --------------------------------------------------------
+gday::write_motd() {
+  local content tmp
+  content=$(gday::assemble)
+  tmp=$(mktemp "${GDAY_MOTD}.gday.XXXXXX") || {
+    printf 'gday: cannot create temp file next to %s\n' "$GDAY_MOTD" >&2
+    return 1
+  }
+  printf '%s\n' "$content" > "$tmp" || { rm -f "$tmp"; return 1; }
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$GDAY_MOTD" || { rm -f "$tmp"; return 1; }
+}
+
+gday::usage() {
+  cat <<'EOF'
+usage: gday [options]
+  (no args)            assemble and print to stdout (does not write /etc/motd)
+  --refresh            full rebuild now and write /etc/motd
+  --static             rebuild the static tier caches now
+  --updates            rebuild the updates tier cache now
+  --section <name>     emit one section (banner|hardware|disk|os|status|packages)
+  --version            print version
+  -h, --help           this help
+EOF
+}
+
+main() {
+  case ${1:-} in
+    '')         gday::assemble ;;
+    --refresh)  gday::build_static; gday::build_updates; gday::write_motd ;;
+    --static)   gday::build_static ;;
+    --updates)  gday::build_updates ;;
+    --section)  [[ $# -ge 2 ]] || { gday::usage >&2; exit 2; }; gday::one_section "$2" ;;
+    --version)  printf "g'day %s\n" "$GDAY_VERSION" ;;
+    -h|--help)  gday::usage ;;
+    *)          gday::usage >&2; exit 2 ;;
+  esac
+}
+
+main "$@"

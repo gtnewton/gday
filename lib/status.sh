@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# status.sh — STATUS section (CLAUDE.md §11, §12). Assemble tier. Glyph-flagged
+# lines for updates, reboot, failed services and SMART, then user plugins from
+# status.d. Every line is isolated; a failure drops only its own line (§5).
+
+[[ -n ${GDAY_STATUS_SH:-} ]] && return 0
+GDAY_STATUS_SH=1
+
+# status::updates — from the cached updates count (updates.txt).
+status::updates() {
+  [[ -r $GDAY_VAR/updates.txt ]] || return 0
+  local line count=''
+  while IFS= read -r line; do
+    [[ $line == updates=* ]] && count=${line#updates=}
+  done < "$GDAY_VAR/updates.txt"
+  [[ $count =~ ^[0-9]+$ ]] || return 0
+  if (( count > 0 )); then
+    render::status "$GDAY_WARN" "${count} update$([[ $count -ne 1 ]] && printf s) available"
+  else
+    render::status "$GDAY_OK" 'System up to date'
+  fi
+}
+
+# status::reboot — from the cached reboot flag (updates.txt).
+status::reboot() {
+  [[ -r $GDAY_VAR/updates.txt ]] || return 0
+  local line reboot=0
+  while IFS= read -r line; do
+    [[ $line == reboot=* ]] && reboot=${line#reboot=}
+  done < "$GDAY_VAR/updates.txt"
+  [[ $reboot == 1 ]] && render::status "$GDAY_WARN" 'Reboot required'
+}
+
+# status::services — live count of failed systemd units.
+status::services() {
+  command -v systemctl >/dev/null 2>&1 || [[ -n ${GDAY_FIXTURE_DIR:-} ]] || return 0
+  local out n
+  out=$(gday::probe systemctl-failed systemctl --failed --no-legend)
+  n=$(printf '%s' "$out" | grep -c '[^[:space:]]' || true)
+  if (( n > 0 )); then
+    render::status "$GDAY_FAULT" "${n} failed unit$([[ $n -ne 1 ]] && printf s)"
+    local line name
+    while IFS= read -r line; do
+      [[ -n $line ]] || continue
+      name=${line%%[[:space:]]*}
+      render::cont "$name"
+    done <<< "$out"
+  else
+    render::status "$GDAY_OK" 'No failed units'
+  fi
+}
+
+# status::disks — summarise SMART results cached by the static tier (smart.txt:
+# one "device: PASSED|FAILED" line per disk).
+status::disks() {
+  [[ -r $GDAY_VAR/smart.txt ]] || return 0
+  local line res total=0 bad=0
+  while IFS= read -r line; do
+    [[ -n $line ]] || continue
+    res=${line##*:}
+    (( total++ ))
+    [[ $res == *FAIL* ]] && (( bad++ ))
+  done < "$GDAY_VAR/smart.txt"
+  (( total > 0 )) || return 0
+  if (( bad > 0 )); then
+    render::status "$GDAY_FAULT" "SMART: ${bad} of ${total} disk$([[ $total -ne 1 ]] && printf s) failing"
+  else
+    render::status "$GDAY_OK" "SMART healthy (${total} disk$([[ $total -ne 1 ]] && printf s))"
+  fi
+}
+
+# status::plugins — run executables in status.d in filename order; append their
+# stdout verbatim. A plugin that exits non-zero or prints nothing is skipped (§12).
+status::plugins() {
+  local dir=${GDAY_PLUGIN_DIR:-/etc/gday/status.d}
+  [[ -d $dir ]] || return 0
+  local f out
+  for f in "$dir"/*; do
+    [[ -f $f && -x $f ]] || continue
+    out=$("$f" 2>/dev/null) || continue
+    [[ -n $out ]] || continue
+    printf '%s\n' "$out"
+  done
+}
+
+# gday::status_section — assemble STATUS.
+gday::status_section() {
+  render::header '📊' 'STATUS'
+  status::updates
+  status::reboot
+  status::services
+  status::disks
+  status::plugins
+}

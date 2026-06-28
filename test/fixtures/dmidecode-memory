@@ -1,0 +1,28 @@
+# dmidecode 3.5
+Getting SMBIOS data from sysfs.
+
+Handle 0x0040, DMI type 17, 92 bytes
+Memory Device
+	Array Handle: 0x003F
+	Size: 16 GB
+	Locator: DIMM 1
+	Type: DDR5
+	Speed: 4800 MT/s
+	Manufacturer: SK Hynix
+
+Handle 0x0042, DMI type 17, 92 bytes
+Memory Device
+	Array Handle: 0x003F
+	Size: 16 GB
+	Locator: DIMM 3
+	Type: DDR5
+	Speed: 4800 MT/s
+	Manufacturer: SK Hynix
+
+Handle 0x0044, DMI type 17, 92 bytes
+Memory Device
+	Array Handle: 0x003F
+	Size: No Module Installed
+	Locator: DIMM 2
+	Type: Unknown
+	Speed: Unknown

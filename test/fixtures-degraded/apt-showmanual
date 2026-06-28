@@ -1,0 +1,15 @@
+build-essential
+curl
+docker-ce
+firefox
+git
+htop
+jq
+neovim
+ripgrep
+tmux
+ubuntu-desktop
+ubuntu-minimal
+ubuntu-standard
+vim
+zsh

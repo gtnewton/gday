@@ -1,0 +1,6 @@
+Filesystem     Type   1K-blocks      Used Capacity Mounted on
+/dev/nvme0n1p2 ext4   959786032 412300000     46% /
+/dev/nvme0n1p1 vfat      523248     56000     11% /boot/efi
+/dev/sda1      ext4  1922728816 980000000     54% /data
+tmpfs          tmpfs   16384000      2048      1% /run
+/dev/nvme0n1p2 ext4   959786032 412300000     46% /var
