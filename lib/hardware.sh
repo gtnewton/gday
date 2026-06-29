@@ -146,7 +146,7 @@ hw::gpu() {
   done <<< "$out"
 }
 
-# hw::storage — one row per real disk from `lsblk`; serials/SMART are root-only.
+# hw::storage — one row per real disk from `lsblk`; serials are root-only.
 hw::storage() {
   local out line name model serial size type first=1
   out=$(hw::_probe lsblk lsblk -d -e7 -n -o NAME,MODEL,SERIAL,SIZE,TYPE)
@@ -158,6 +158,8 @@ hw::storage() {
     [[ -n $name ]] || continue
     type=${rest##* }
     [[ $type == disk ]] || continue
+    # zram is a virtual compressed-RAM device, not a storage disk; skip it.
+    [[ $name == zram* ]] && continue
     rest=${rest% *}            # drop TYPE
     size=${rest##* }
     rest=${rest% *}            # drop SIZE
@@ -175,6 +177,39 @@ hw::storage() {
       render::cont "  S/N ${serial}"
     fi
   done <<< "$out"
+}
+
+# hw::smart_build — run smartctl -H on each real disk and write smart.txt.
+# Called by gday::build_static (static tier, root). Each line: "name: PASSED|FAILED".
+hw::smart_build() {
+  # In fixture mode, skip the root and tool checks so SMART is testable without root.
+  if [[ -z ${GDAY_FIXTURE_DIR:-} ]]; then
+    [[ ${GDAY_ROOT:-0} -eq 1 ]] || return 0
+    command -v smartctl >/dev/null 2>&1 || return 0
+  fi
+  local lsblk_out line name rest type tmp result
+  lsblk_out=$(hw::_probe lsblk lsblk -d -e7 -n -o NAME,MODEL,SERIAL,SIZE,TYPE)
+  [[ -n $lsblk_out ]] || return 0
+  tmp=$(mktemp "${GDAY_VAR}/.smart.XXXXXX") || return 0
+  while IFS= read -r line; do
+    read -r name rest <<< "$line"
+    [[ -n $name ]] || continue
+    type=${rest##* }
+    [[ $type == disk ]] || continue
+    [[ $name == zram* ]] && continue
+    result=$(gday::probe "smartctl-${name}" smartctl -H "/dev/${name}") || true
+    if grep -q 'PASSED' <<< "$result"; then
+      printf '%s: PASSED\n' "$name" >> "$tmp"
+    elif grep -q 'FAILED' <<< "$result"; then
+      printf '%s: FAILED\n' "$name" >> "$tmp"
+    fi
+  done <<< "$lsblk_out"
+  if [[ -s $tmp ]]; then
+    chmod 0644 "$tmp"
+    mv -f "$tmp" "${GDAY_VAR}/smart.txt"
+  else
+    rm -f "$tmp"
+  fi
 }
 
 # hw::advisory — the single not-root advisory line (§11, §15).

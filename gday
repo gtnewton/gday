@@ -73,6 +73,7 @@ gday::build_static() {
   gday::detect
   mkdir -p "$GDAY_VAR"
   gday::packages_build              # writes pkgs.txt (full list)
+  hw::smart_build                   # writes smart.txt (root-only; degrades silently)
   gday::_write_cache banner   gday::banner_section
   gday::_write_cache hardware gday::hardware_section
   gday::_write_cache packages gday::packages_section
