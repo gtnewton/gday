@@ -1,35 +1,46 @@
 #!/usr/bin/env bash
-# 20-snapraid.sh.example — g'day status plugin: SnapRAID sync age.
+# 20-snapraid.sh.example — g'day status plugin: SnapRAID status.
 #
-# To activate: copy to /etc/gday/status.d/20-snapraid.sh, make executable,
-# and set SNAPRAID_CONF below if your config is not in the default location.
+# Designed for snapraid-aio-script log format:
+#   [YYYY-MM-DD HH:MM:SS] snapraid-aio-script.sh: INFO: 'SnapRAID SYNC finished'
+#
+# To activate: copy to /etc/gday/status.d/20-snapraid.sh, make executable.
+# Set SNAPRAID_LOG below if your log is not at the default location.
 
 set -uo pipefail
 
-SNAPRAID_CONF=${SNAPRAID_CONF:-/etc/snapraid.conf}
 SNAPRAID_LOG=${SNAPRAID_LOG:-/var/log/snapraid.log}
 
 row() { printf '   %-12s %s\n' "$1" "$2"; }
 
-command -v snapraid >/dev/null 2>&1 || exit 0
-[[ -r $SNAPRAID_LOG ]]             || exit 0
+[[ -r $SNAPRAID_LOG ]] || exit 0
 
-# Find the most recent "Completed" line in the log.
-last=$(grep -i 'completed' "$SNAPRAID_LOG" 2>/dev/null | tail -1) || exit 0
-[[ -n $last ]] || exit 0
+_age_str() {
+  local ts=$1 epoch now age_days
+  epoch=$(date -d "$ts" +%s 2>/dev/null) || return 1
+  now=$(date +%s)
+  age_days=$(( (now - epoch) / 86400 ))
+  if (( age_days == 0 )); then printf 'today'
+  elif (( age_days == 1 )); then printf 'yesterday'
+  else printf '%dd ago' "$age_days"
+  fi
+}
 
-# SnapRAID log lines begin with a timestamp like "2026-06-28 03:00:01".
-ts=$(printf '%s' "$last" | grep -oP '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}') || exit 0
-[[ -n $ts ]] || exit 0
+_last_ts() {
+  local pattern=$1 line ts
+  line=$(grep -i "$pattern" "$SNAPRAID_LOG" 2>/dev/null | tail -1) || return 1
+  [[ -n $line ]] || return 1
+  # Timestamp format: [YYYY-MM-DD HH:MM:SS]
+  ts=$(printf '%s' "$line" | grep -oP '(?<=\[)\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?=\])') || return 1
+  [[ -n $ts ]] || return 1
+  printf '%s' "$ts"
+}
 
-epoch=$(date -d "$ts" +%s 2>/dev/null) || exit 0
-now=$(date +%s)
-age_days=$(( (now - epoch) / 86400 ))
-
-if (( age_days == 0 )); then
-  row 'SnapRAID' 'synced today'
-elif (( age_days == 1 )); then
-  row 'SnapRAID' 'synced yesterday'
-else
-  row 'SnapRAID' "synced ${age_days}d ago"
+# Show last SYNC if it ran; otherwise last DIFF.
+if ts=$(_last_ts 'SnapRAID SYNC finished'); then
+  age=$(_age_str "$ts") || exit 0
+  row 'SnapRAID' "synced ${age}"
+elif ts=$(_last_ts 'SnapRAID DIFF finished'); then
+  age=$(_age_str "$ts") || exit 0
+  row 'SnapRAID' "diff ${age} (sync not run)"
 fi
