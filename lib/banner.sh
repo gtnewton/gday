@@ -18,10 +18,11 @@ banner::_hostname() {
 # banner::_art <host> — the figlet/toilet art, or the bordered fallback.
 banner::_art() {
   local host=$1 art=''
+  local font=${GDAY_FIGLET_FONT:-standard}
   if command -v figlet >/dev/null 2>&1; then
-    art=$(figlet -f standard -w "$GDAY_WIDTH" "$host" 2>/dev/null)
+    art=$(figlet -f "$font" -w "$GDAY_WIDTH" "$host" 2>/dev/null)
   elif command -v toilet >/dev/null 2>&1; then
-    art=$(toilet -f standard -w "$GDAY_WIDTH" "$host" 2>/dev/null)
+    art=$(toilet -f "$font" -w "$GDAY_WIDTH" "$host" 2>/dev/null)
   fi
   if [[ -n ${GDAY_FIXTURE_DIR:-} && -r $GDAY_FIXTURE_DIR/figlet ]]; then
     art=$(cat -- "$GDAY_FIXTURE_DIR/figlet")   # let tests exercise the art path
