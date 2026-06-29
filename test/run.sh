@@ -155,20 +155,23 @@ for fdir in "${fixture_dirs[@]}"; do
   run_section "status/header" "$fdir" -- "STATUS"
   if grep -q 'failed' "$fdir/systemctl-failed" 2>/dev/null && \
      [[ $(wc -l < "$fdir/systemctl-failed") -gt 0 ]]; then
-    # Has failed units
     run_section "status/failed-units" "$fdir" -- "failed unit"
   fi
 
-  # ── Packages ─────────────────────────────────────────────────────────────
+  # ── Packages + SMART (both need the static cache) ────────────────────────
   section=packages
-  # Need static cache first
-  rm -f "$tmpdir/pkgs.txt"
+  rm -f "$tmpdir/pkgs.txt" "$tmpdir/smart.txt"
   env GDAY_FIXTURE_DIR="$fdir" GDAY_VAR="$tmpdir" "$gday" --static >/dev/null 2>&1 || true
   if [[ -r $tmpdir/pkgs.txt && $(wc -l < "$tmpdir/pkgs.txt") -gt 0 ]]; then
     run_section "packages/count" "$fdir" -- "EXPLICITLY INSTALLED" "Count"
   else
-    # No package data in this fixture set — check header at least
     run_section "packages/header-only" "$fdir" -- "EXPLICITLY INSTALLED"
+  fi
+
+  # SMART: if smartctl fixtures exist for this set, the cache should show healthy
+  section=status
+  if [[ -s $tmpdir/smart.txt ]]; then
+    run_section "status/smart-healthy" "$fdir" -- "SMART healthy"
   fi
 
   # ── Config: GDAY_EMOJI=0 ─────────────────────────────────────────────────
