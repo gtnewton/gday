@@ -38,7 +38,7 @@ cap dmidecode-system   dmidecode -t system
 cap dmidecode-baseboard dmidecode -t baseboard
 cap dmidecode-memory   dmidecode -t memory
 
-cap df df -P --output=source,fstype,size,used,pcent,target
+cap df df --output=source,fstype,size,used,pcent,target
 cap systemctl-failed systemctl --failed --no-legend
 
 cap gnome-shell gnome-shell --version
