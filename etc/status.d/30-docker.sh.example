@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# 30-docker.sh.example — g'day status plugin: Docker container summary.
+#
+# To activate: copy to /etc/gday/status.d/30-docker.sh, make executable.
+# Requires the gday service user to be in the docker group, or run as root.
+#
+# NOTE: `docker ps` can be slow if the daemon is busy. If this plugin causes
+# the refresh timer to lag, increase the timer interval or remove this plugin.
+
+set -uo pipefail
+
+row() { printf '   %-12s %s\n' "$1" "$2"; }
+
+command -v docker >/dev/null 2>&1 || exit 0
+docker info >/dev/null 2>&1       || exit 0   # skip if daemon not running
+
+total=$(docker ps -q 2>/dev/null | wc -l) || exit 0
+(( total > 0 )) || { row 'Docker' 'no containers running'; exit 0; }
+
+row 'Docker' "${total} container$([[ $total -ne 1 ]] && printf s) running"

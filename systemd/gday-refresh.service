@@ -1,0 +1,10 @@
+[Unit]
+Description=g'day refresh — assemble /etc/motd from caches
+Documentation=man:gday(1)
+After=local-fs.target
+
+[Service]
+Type=oneshot
+# --write-motd: assemble from caches + live probes, then write /etc/motd.
+# Does NOT rebuild the static or updates caches (that is the other tiers' job).
+ExecStart=/usr/local/bin/gday --write-motd

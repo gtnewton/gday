@@ -77,17 +77,25 @@ render::rule() {
   printf '\n'
 }
 
-# render::header <emoji> <LABEL> — §9 section header:
-#   space, emoji, two spaces, UPPER label, one space, rule to column 80.
+# render::header <emoji> <LABEL> — §9 section header.
+# When GDAY_EMOJI=0, the emoji is omitted and a plain two-space indent is used.
 render::header() {
   local emoji=$1 label=$2 used fill
-  # Display width of the textual prefix, emoji counted as GDAY_EMOJI_CELLS.
-  used=$(( 1 + GDAY_EMOJI_CELLS + 2 + ${#label} + 1 ))
-  fill=$(( GDAY_WIDTH - used ))
-  (( fill < 0 )) && fill=0
-  printf ' %s  %s ' "$emoji" "$label"
-  render::_repeat "$GDAY_RULE_CHAR" "$fill"
-  printf '\n'
+  if [[ ${GDAY_EMOJI:-1} == 0 ]]; then
+    used=$(( 2 + ${#label} + 1 ))
+    fill=$(( GDAY_WIDTH - used ))
+    (( fill < 0 )) && fill=0
+    printf '  %s ' "$label"
+    render::_repeat "$GDAY_RULE_CHAR" "$fill"
+    printf '\n'
+  else
+    used=$(( 1 + GDAY_EMOJI_CELLS + 2 + ${#label} + 1 ))
+    fill=$(( GDAY_WIDTH - used ))
+    (( fill < 0 )) && fill=0
+    printf ' %s  %s ' "$emoji" "$label"
+    render::_repeat "$GDAY_RULE_CHAR" "$fill"
+    printf '\n'
+  fi
 }
 
 # render::row <label> <value> — §9 body row: three-space indent, fixed-width
@@ -106,8 +114,16 @@ render::cont() {
 
 # render::status <glyph> <text> — a glyph-led STATUS line: three-space indent,
 # glyph, two spaces, message. The shared form for core status rows and plugins.
+# When GDAY_EMOJI=0, glyphs are replaced with plain ASCII markers.
 render::status() {
   local glyph=$1 text=$2
+  if [[ ${GDAY_EMOJI:-1} == 0 ]]; then
+    case $glyph in
+      "$GDAY_OK")    glyph='[ok]'  ;;
+      "$GDAY_WARN")  glyph='[!!]'  ;;
+      "$GDAY_FAULT") glyph='[XX]'  ;;
+    esac
+  fi
   printf '   %s  %s\n' "$glyph" "$text"
 }
 
@@ -134,7 +150,7 @@ render::wrap() {
 
 # render::bar <percent> [width] — §9 usage bar with caps.
 render::bar() {
-  local pct=$1 width=${2:-$GDAY_BAR_WIDTH_DEFAULT} filled empty
+  local pct=$1 width=${2:-${GDAY_BAR_WIDTH:-$GDAY_BAR_WIDTH_DEFAULT}} filled empty
   [[ $pct =~ ^[0-9]+$ ]] || pct=0
   (( pct < 0 )) && pct=0
   (( pct > 100 )) && pct=100

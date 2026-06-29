@@ -1,0 +1,11 @@
+[Unit]
+Description=g'day updates tier timer — runs hourly
+Documentation=man:gday(1)
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

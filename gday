@@ -26,6 +26,29 @@ GDAY_LIB=${GDAY_LIB:-$(gday::_resolve_lib)}
 GDAY_VAR=${GDAY_VAR:-/var/lib/gday}
 GDAY_MOTD=${GDAY_MOTD:-/etc/motd}
 
+# --- config loading (§13) ---------------------------------------------------
+# Source /etc/gday/gday.conf (or $GDAY_CONF) before libs so that GDAY_* vars
+# set there take effect. An invalid value warns and falls back; never aborts.
+gday::_load_conf() {
+  local conf=${GDAY_CONF:-/etc/gday/gday.conf}
+  [[ -r $conf ]] || return 0
+  # shellcheck source=/dev/null
+  source "$conf" 2>/dev/null || {
+    printf 'gday: warning: could not source %s\n' "$conf" >&2
+    return 0
+  }
+  # Validate integer fields; reset to default (unset) on bad value.
+  local v val
+  for v in GDAY_BAR_WIDTH GDAY_PKG_INLINE_N; do
+    val=${!v:-}
+    if [[ -n $val && ! $val =~ ^[0-9]+$ ]]; then
+      printf 'gday: warning: invalid %s=%q in %s; using default\n' "$v" "$val" "$conf" >&2
+      unset "$v"
+    fi
+  done
+}
+gday::_load_conf
+
 for _lib in render detect hardware banner os disk status packages updates; do
   # shellcheck source=/dev/null
   source "$GDAY_LIB/${_lib}.sh"
@@ -82,12 +105,17 @@ gday::footer() {
 
 gday::assemble() {
   gday::detect
-  gday::_cached banner   gday::banner_section ; printf '\n'
-  gday::_cached hardware gday::hardware_section ; printf '\n'
-  gday::_emit gday::disk_section   ; printf '\n'
-  gday::_emit gday::os_section     ; printf '\n'
-  gday::_emit gday::status_section ; printf '\n'
-  gday::_cached packages gday::packages_section ; printf '\n'
+  # GDAY_SECTIONS: space-separated list of enabled sections (§13). Fixed
+  # render order is always preserved (§9); this only controls which appear.
+  local sections=${GDAY_SECTIONS:-banner hardware disk os status packages}
+  gday::_sec_on() { case " $sections " in *" $1 "*) return 0 ;; esac; return 1; }
+
+  gday::_sec_on banner   && { gday::_cached banner   gday::banner_section   ; printf '\n'; }
+  gday::_sec_on hardware && { gday::_cached hardware gday::hardware_section ; printf '\n'; }
+  gday::_sec_on disk     && { gday::_emit gday::disk_section                ; printf '\n'; }
+  gday::_sec_on os       && { gday::_emit gday::os_section                  ; printf '\n'; }
+  gday::_sec_on status   && { gday::_emit gday::status_section              ; printf '\n'; }
+  gday::_sec_on packages && { gday::_cached packages gday::packages_section ; printf '\n'; }
   gday::footer
 }
 
@@ -126,6 +154,7 @@ usage: gday [options]
   --refresh            full rebuild now and write /etc/motd
   --static             rebuild the static tier caches now
   --updates            rebuild the updates tier cache now
+  --write-motd         assemble from caches and write /etc/motd (used by gday-refresh.service)
   --section <name>     emit one section (banner|hardware|disk|os|status|packages)
   --version            print version
   -h, --help           this help
@@ -134,14 +163,15 @@ EOF
 
 main() {
   case ${1:-} in
-    '')         gday::assemble ;;
-    --refresh)  gday::build_static; gday::build_updates; gday::write_motd ;;
-    --static)   gday::build_static ;;
-    --updates)  gday::build_updates ;;
-    --section)  [[ $# -ge 2 ]] || { gday::usage >&2; exit 2; }; gday::one_section "$2" ;;
-    --version)  printf "g'day %s\n" "$GDAY_VERSION" ;;
-    -h|--help)  gday::usage ;;
-    *)          gday::usage >&2; exit 2 ;;
+    '')            gday::assemble ;;
+    --refresh)     gday::build_static; gday::build_updates; gday::write_motd ;;
+    --static)      gday::build_static ;;
+    --updates)     gday::build_updates ;;
+    --write-motd)  gday::write_motd ;;
+    --section)     [[ $# -ge 2 ]] || { gday::usage >&2; exit 2; }; gday::one_section "$2" ;;
+    --version)     printf "g'day %s\n" "$GDAY_VERSION" ;;
+    -h|--help)     gday::usage ;;
+    *)             gday::usage >&2; exit 2 ;;
   esac
 }
 

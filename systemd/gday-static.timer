@@ -1,0 +1,18 @@
+[Unit]
+Description=g'day static tier timer — runs at boot and daily
+Documentation=man:gday(1)
+
+[Timer]
+# Boot delay: give the system a moment to settle before the expensive probes.
+OnBootSec=30s
+# Daily calendar refresh to catch firmware/package list drift.
+OnCalendar=daily
+# Spread the daily run randomly within a 5-minute window to avoid stampede
+# on multi-host environments.
+RandomizedDelaySec=5min
+# Ensure a missed run (e.g. the system was off at the scheduled time) fires
+# when the system next comes up.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

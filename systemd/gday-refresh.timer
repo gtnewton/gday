@@ -1,0 +1,11 @@
+[Unit]
+Description=g'day refresh timer — assembles /etc/motd every 5 minutes
+Documentation=man:gday(1)
+
+[Timer]
+# Fire 30 seconds after the static tier completes at boot, then every 5 min.
+OnBootSec=60s
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

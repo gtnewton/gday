@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# 10-restic.sh.example — g'day status plugin: restic last backup age.
+#
+# To activate: copy to /etc/gday/status.d/10-restic.sh, make executable,
+# and set REPO and PASSWORD_FILE below.
+#
+# Output is appended to the STATUS section (§12). Must be fast; runs every
+# 5 minutes. Exit non-zero or print nothing → silently skipped.
+
+set -uo pipefail
+
+REPO=''               # e.g. /mnt/backup or sftp:host:/backup
+PASSWORD_FILE=''      # path to restic password file
+
+# Row helper matching the §9 alignment (label column = 12 chars).
+row() { printf '   %-12s %s\n' "$1" "$2"; }
+
+[[ -n $REPO && -n $PASSWORD_FILE ]] || exit 0
+command -v restic >/dev/null 2>&1    || exit 0
+command -v jq    >/dev/null 2>&1     || exit 0
+
+snap=$(restic --repo "$REPO" --password-file "$PASSWORD_FILE" \
+  snapshots --last --json 2>/dev/null) || exit 0
+ts=$(printf '%s' "$snap" | jq -r '.[-1].time // empty' 2>/dev/null) || exit 0
+[[ -n $ts ]] || exit 0
+
+# Convert ISO 8601 timestamp to seconds since epoch; compute age in days.
+epoch=$(date -d "$ts" +%s 2>/dev/null) || exit 0
+now=$(date +%s)
+age_days=$(( (now - epoch) / 86400 ))
+
+if (( age_days == 0 )); then
+  row 'Backup' 'today'
+elif (( age_days == 1 )); then
+  row 'Backup' 'yesterday'
+else
+  row 'Backup' "${age_days}d ago"
+fi

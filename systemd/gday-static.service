@@ -1,0 +1,11 @@
+[Unit]
+Description=g'day static tier — banner, hardware, packages
+Documentation=man:gday(1)
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gday --static
+# Failures are tolerated: a non-zero exit means a cache write failed, but
+# partial caches already written are still valid. The refresh timer will read
+# whatever is present. Do not restart; the next timer fire will retry.

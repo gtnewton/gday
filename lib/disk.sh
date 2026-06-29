@@ -15,6 +15,25 @@ disk::_is_pseudo() {
   return 1
 }
 
+# disk::_mount_allowed <target> — false if excluded or not in include list (§13).
+disk::_mount_allowed() {
+  local target=$1 pat
+  if [[ -n ${GDAY_DISK_INCLUDE:-} ]]; then
+    for pat in $GDAY_DISK_INCLUDE; do
+      # shellcheck disable=SC2254
+      [[ $target == $pat ]] && return 0
+    done
+    return 1
+  fi
+  if [[ -n ${GDAY_DISK_EXCLUDE:-} ]]; then
+    for pat in $GDAY_DISK_EXCLUDE; do
+      # shellcheck disable=SC2254
+      [[ $target == $pat ]] && return 1
+    done
+  fi
+  return 0
+}
+
 # gday::disk_section — assemble DISK USAGE.
 # Consumes GNU `df --output`; fields: source fstype size(KiB) used(KiB) pcent target.
 gday::disk_section() {
@@ -37,6 +56,7 @@ gday::disk_section() {
     case $seen in *" $src "*) continue ;; esac       # de-dupe by source device
     seen="$seen$src "
 
+    disk::_mount_allowed "$target" || continue
     pct=${pcent%\%}
     [[ $pct =~ ^[0-9]+$ ]] || pct=0
     bar=$(render::bar "$pct")

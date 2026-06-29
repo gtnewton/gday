@@ -1,0 +1,11 @@
+[Unit]
+Description=g'day updates tier — pending update count, reboot flag
+Documentation=man:gday(1)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gday --updates
+# This tier reads already-synced package state only; it MUST NOT and does not
+# sync package databases (no apt-get update / pacman -Sy / dnf makecache).
