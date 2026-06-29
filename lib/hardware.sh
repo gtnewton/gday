@@ -43,7 +43,7 @@ hw::system() {
   [[ -n $ver ]] && val="${val} (rev ${ver})"
   val=${val#"${val%%[![:space:]]*}"}
   [[ -n $val ]] || return 0
-  render::row 'System' "$val"
+  render::wrap 'System' "$val"
   if [[ ${GDAY_ROOT:-0} -eq 1 ]]; then
     serial=$(hw::_dmi_field "$out" 'Serial Number')
     [[ -n $serial ]] && render::cont "S/N ${serial}"
@@ -62,7 +62,7 @@ hw::mainboard() {
   [[ -n $ver ]] && val="${val} (rev ${ver})"
   val=${val#"${val%%[![:space:]]*}"}
   [[ -n $val ]] || return 0
-  render::row 'Mainboard' "$val"
+  render::wrap 'Mainboard' "$val"
 }
 
 # hw::cpu — CPU row from `lscpu`: model name + cores/threads as "4C / 8T".
