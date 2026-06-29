@@ -21,8 +21,13 @@ banner::_art() {
   local font=${GDAY_FIGLET_FONT:-standard}
   if command -v figlet >/dev/null 2>&1; then
     art=$(figlet -f "$font" -w "$GDAY_WIDTH" "$host" 2>/dev/null)
+    # Fall back to standard font if configured font is unavailable.
+    [[ -n $art || $font == standard ]] || \
+      art=$(figlet -f standard -w "$GDAY_WIDTH" "$host" 2>/dev/null)
   elif command -v toilet >/dev/null 2>&1; then
     art=$(toilet -f "$font" -w "$GDAY_WIDTH" "$host" 2>/dev/null)
+    [[ -n $art || $font == standard ]] || \
+      art=$(toilet -f standard -w "$GDAY_WIDTH" "$host" 2>/dev/null)
   fi
   if [[ -n ${GDAY_FIXTURE_DIR:-} && -r $GDAY_FIXTURE_DIR/figlet ]]; then
     art=$(cat -- "$GDAY_FIXTURE_DIR/figlet")   # let tests exercise the art path

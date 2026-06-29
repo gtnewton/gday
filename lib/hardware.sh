@@ -24,7 +24,10 @@ hw::_dmi_field() {
     # Skip placeholder junk dmidecode commonly emits.
     case $val in
       ''|'To be filled by O.E.M.'|'Not Specified'|'Default string'|\
-      'System manufacturer'|'System Product Name'|'None'|'Unknown') return 0 ;;
+      'System manufacturer'|'System Product Name'|'System Version'|\
+      'System Serial Number'|'Board Manufacturer'|'Board Product Name'|\
+      'Board Version'|'Board Serial Number'|\
+      'None'|'Unknown'|'Not Available'|'N/A') return 0 ;;
     esac
     printf '%s' "$val"
     return 0
@@ -151,9 +154,12 @@ hw::storage() {
   local out line name model serial size type first=1
   out=$(hw::_probe lsblk lsblk -d -e7 -n -o NAME,MODEL,SERIAL,SIZE,TYPE)
   [[ -n $out ]] || return 0
+  # Collapse lsblk's column-padding (multiple spaces) to single spaces so
+  # back-word parsing of TYPE, SIZE, SERIAL is not confused by trailing spaces.
+  out=$(awk '{$1=$1; print}' <<< "$out")
   while IFS= read -r line; do
-    # Fields are whitespace-separated; MODEL may contain spaces, so read by
-    # fixed trailing columns: NAME ... SIZE TYPE, with SERIAL before SIZE.
+    # Fields are single-space-separated; MODEL may contain spaces, so parse
+    # by stripping fixed trailing columns: TYPE, SIZE, SERIAL from the end.
     read -r name rest <<< "$line"
     [[ -n $name ]] || continue
     type=${rest##* }
@@ -190,6 +196,7 @@ hw::smart_build() {
   local lsblk_out line name rest type tmp result
   lsblk_out=$(hw::_probe lsblk lsblk -d -e7 -n -o NAME,MODEL,SERIAL,SIZE,TYPE)
   [[ -n $lsblk_out ]] || return 0
+  lsblk_out=$(awk '{$1=$1; print}' <<< "$lsblk_out")
   tmp=$(mktemp "${GDAY_VAR}/.smart.XXXXXX") || return 0
   while IFS= read -r line; do
     read -r name rest <<< "$line"
