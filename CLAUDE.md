@@ -118,11 +118,15 @@ is the correct, dependency-free choice. Files MUST be `0644`, root-owned.
 ```
 /usr/local/bin/gday               # main CLI
 /usr/local/lib/gday/              # library, sourced by gday
-  detect.sh hardware.sh packages.sh disk.sh os.sh status.sh render.sh
+  detect.sh hardware.sh banner.sh packages.sh disk.sh os.sh status.sh
+  updates.sh render.sh
 /etc/gday/gday.conf               # config
 /etc/gday/status.d/               # user plugins (executable, run as root)
 /var/lib/gday/                    # caches: banner.txt hardware.txt packages.txt
-                                  #         pkgs.txt updates.txt
+                                  #         pkgs.txt updates.txt smart.txt
+                                  # install state: install-rollback.txt,
+                                  #         motd.orig (both consumed/removed
+                                  #         by uninstall.sh — see §20)
 /etc/systemd/system/gday-*.{service,timer}
 /etc/motd                         # assembled output (overwritten each refresh)
 ```
@@ -240,6 +244,11 @@ Run by `gday-refresh` (inherit root), output appended to STATUS.
 - Exit non-zero or print nothing ⇒ silently skipped (per §5).
 - MUST be fast: runs every refresh. A slow `docker ps` taxes every 5 min.
 - Ship inert `*.sh.example` plugins for restic/SnapRAID/Docker.
+- A plugin file (and the `status.d` directory itself) MUST be owned by root or
+  the invoking user, and MUST NOT be group/other-writable, or it is silently
+  skipped — plugins execute with this process's privileges (root, under the
+  shipped systemd service), so this is the same discipline sudoers.d applies
+  to its drop-ins (§17).
 
 ## 13. Configuration (`/etc/gday/gday.conf`)
 
@@ -278,6 +287,12 @@ avoid parsing `ls`; avoid needless subshells. MUST NOT use `eval`.
 - Treat all external output (`dmidecode`, `os-release`, `lsblk`, plugin stdout)
   as **data, never code** — no command substitution of probe output into an
   executed context, no unquoted expansions of it.
+- This applies to terminal injection too, not just shell injection: `/etc/motd`
+  is displayed by whatever terminal the user's login lands in, so any value
+  derived from external probes or plugin output MUST have raw control bytes
+  (ANSI/terminal escape sequences) stripped before it reaches a render helper
+  — see `render::sanitize` in `lib/render.sh`. A crafted USB device's `lsblk`
+  MODEL string is a realistic no-root attack vector here.
 - Validate externally supplied paths from config before use.
 
 ## 18. Performance (principles, not SLAs)
@@ -292,20 +307,42 @@ avoid parsing `ls`; avoid needless subshells. MUST NOT use `eval`.
 
 - `gday` — print assembled output to stdout (test/preview; does not write
   `/etc/motd`).
-- `gday --refresh` — full rebuild now, write `/etc/motd`.
+- `gday --refresh` — full rebuild now (static tier + updates tier), write
+  `/etc/motd`.
 - `gday --static` — rebuild static tier now.
-- `gday --section <hardware|disk|os|status|packages>` — emit one section to
-  stdout. Primary debug and test affordance.
+- `gday --updates` — rebuild updates tier (pending-update count, reboot flag)
+  now.
+- `gday --write-motd` — assemble from existing caches + live probes and write
+  `/etc/motd`, without rebuilding either cache tier. Used by
+  `gday-refresh.service`.
+- `gday --section <banner|hardware|disk|os|status|packages>` — emit one
+  section to stdout. Primary debug and test affordance.
 - `gday --version`.
+- `gday -h` / `gday --help`.
 
 ## 20. Installer / uninstaller
 
-- **Idempotent:** re-running install MUST converge, not duplicate.
-- **Rollback state recorded** (notably the Debian `update-motd.d` change) so
-  uninstall restores the prior state — re-enable the stock scripts, remove
-  `/etc/motd` content we own, remove units and reload systemd.
+- **Idempotent:** re-running install MUST converge to the current config, not
+  duplicate or leave stale state. This includes negative convergence: a
+  cadence override (`GDAY_*_ONCALENDAR`/`INTERVAL`) removed from `gday.conf`
+  MUST cause install.sh to remove the corresponding `.timer.d/cadence.conf`
+  drop-in, not just skip creating a new one — otherwise a reverted config
+  value silently has no effect.
+- **Rollback state recorded** (the Debian `update-motd.d` change; the
+  pre-existing `/etc/motd`, if any, backed up to `$GDAY_VAR/motd.orig` before
+  first being overwritten) so uninstall restores the prior state — re-enable
+  the stock scripts, restore original `/etc/motd` content (or blank it if
+  there was none), remove units and reload systemd.
+- **Rollback records MUST be consumed, not left behind.** Once uninstall.sh
+  has restored a script's exec bit from `install-rollback.txt`, it MUST clear
+  that record — otherwise a later reinstall's "already handled" idempotency
+  check is fooled by the stale entry and skips re-neutralising a script that
+  is, in fact, executable again, silently defeating §3 on Debian/Ubuntu.
 - Installed files MUST have explicit ownership and permissions (root-owned;
-  caches `0644`; plugins/executables `0755`; config `0644`).
+  caches `0644`; plugins/executables `0755`; config `0644`) — this includes
+  directories, not just files: MUST NOT rely on umask for any directory that
+  ends up holding root-executed content (`/etc/gday`, `status.d`, timer
+  drop-in dirs).
 - No upgrade-migration machinery in v1 (nothing to migrate).
 
 ## 21. Build order

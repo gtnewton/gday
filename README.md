@@ -15,12 +15,12 @@ no per-login work and no shell-specific hooks.
          skylab · Ubuntu 24.04.1 LTS · GNOME 46.2 · wayland
 
  💻  HARDWARE ──────────────────────────────────────────────────────────────────
-   System       Dell Inc. XPS 8950 (rev 1.0.5)
-   CPU          12th Gen Intel(R) Core(TM) i7-12700K — 8C / 16T
+   System       Acme Systems Workstation Pro (rev 1.0)
+   CPU          AMD Ryzen 7 5800X — 8C / 16T
    Memory       31.3 GiB
-   GPU          Intel Corporation AlderLake-S GT1 [UHD Graphics 770]
-                NVIDIA Corporation GA104 [GeForce RTX 3070]
-   Storage      nvme0n1: Samsung SSD 980 PRO 1TB  (931.5G)
+   GPU          Intel Corporation UHD Graphics 630
+                AMD/ATI Radeon RX 6700 XT
+   Storage      nvme0n1: Generic NVMe SSD 1TB  (931.5G)
 
  💽  DISK USAGE ────────────────────────────────────────────────────────────────
    /            ▕██████████░░░░░░░░░░░░▏  46%  393G / 915G
@@ -84,7 +84,8 @@ sudo ./uninstall.sh --purge   # also removes /etc/gday and /var/lib/gday
 ```
 
 Uninstall restores the execute bit on any `update-motd.d` scripts that were
-neutralised during install.
+neutralised during install, and restores whatever `/etc/motd` contained before
+install.sh first overwrote it (if anything) instead of leaving it blank.
 
 ## Configuration
 
@@ -115,16 +116,21 @@ Cadences (static, updates, refresh intervals) live in the systemd `.timer`
 units. Change them by editing the units or creating systemd drop-ins
 (`/etc/systemd/system/gday-*.timer.d/override.conf`). Re-running `install.sh`
 after setting `GDAY_STATIC_ONCALENDAR`, `GDAY_UPDATES_ONCALENDAR`, or
-`GDAY_REFRESH_INTERVAL` in `gday.conf` will also apply them as drop-ins.
+`GDAY_REFRESH_INTERVAL` in `gday.conf` will also apply them as drop-ins — and
+removing the setting again and re-running `install.sh` removes the drop-in,
+reverting to the shipped default.
 
 ## CLI
 
 ```
 gday                 preview the banner (does not write /etc/motd)
-gday --section os    emit one section for debugging
+gday --section os    emit one section for debugging (banner|hardware|disk|os|status|packages)
 gday --refresh       full rebuild + write /etc/motd now
 gday --static        rebuild hardware/packages caches now
 gday --updates       rebuild update count cache now
+gday --write-motd    assemble from existing caches + write /etc/motd (used by gday-refresh.service)
+gday --version       print version
+gday --help          this help
 ```
 
 ## Status plugins
@@ -142,6 +148,11 @@ Example plugins (inert until activated) are installed to `/etc/gday/status.d/`:
 
 To activate: copy to the same directory without `.example`, set the execute
 bit, and configure the variables at the top of the file.
+
+A plugin (and `status.d` itself) must be owned by root or the invoking user
+and not group/other-writable, or it's silently skipped — plugins run with
+this process's privileges, so the same discipline `sudoers.d` applies to its
+drop-ins applies here.
 
 ## Graceful degradation
 
