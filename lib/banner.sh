@@ -33,14 +33,23 @@ banner::_art() {
     art=$(cat -- "$GDAY_FIXTURE_DIR/figlet")   # let tests exercise the art path
   fi
   if [[ -n $art ]]; then
-    # Strip trailing all-blank lines figlet tends to emit (portable awk).
-    printf '%s\n' "$art" | awk '
+    # Strip trailing blank lines and centre within GDAY_WIDTH (ASCII art: byte
+    # length == display width so awk length() is correct here).
+    printf '%s\n' "$art" | awk -v w="$GDAY_WIDTH" '
       {lines[n++]=$0}
       END{ last=n-1;
            while (last>=0 && lines[last] ~ /^[[:space:]]*$/) last--;
-           for (i=0;i<=last;i++) print lines[i] }'
+           mx=0; for(i=0;i<=last;i++){l=length(lines[i]);if(l>mx)mx=l}
+           pad=int((w-mx)/2); if(pad<0)pad=0;
+           sp=""; for(i=0;i<pad;i++) sp=sp" ";
+           for (i=0;i<=last;i++) print sp lines[i] }'
   else
-    render::box "$host"
+    local box_w pad sp
+    box_w=$(( ${#host} + 4 ))
+    pad=$(( (GDAY_WIDTH - box_w) / 2 ))
+    (( pad < 0 )) && pad=0
+    sp=$(printf '%*s' "$pad" '')
+    render::box "$host" | while IFS= read -r line; do printf '%s%s\n' "$sp" "$line"; done
   fi
 }
 
@@ -60,9 +69,12 @@ banner::_subtitle() {
 
 # gday::banner_section — full banner (art + subtitle) to stdout.
 gday::banner_section() {
-  local host
+  local host sub pad
   host=$(banner::_hostname)
   banner::_art "$host"
   printf '\n'
-  render::row '' "$(banner::_subtitle "$host")"
+  sub=$(banner::_subtitle "$host")
+  pad=$(( (GDAY_WIDTH - ${#sub}) / 2 ))
+  (( pad < 0 )) && pad=0
+  printf '%*s%s\n' "$pad" '' "$sub"
 }

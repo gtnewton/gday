@@ -48,7 +48,7 @@ fi
 
 # ── Clear /etc/motd if we own it ─────────────────────────────────────────────
 if [[ -f $GDAY_MOTD ]]; then
-  if grep -q "g'day" "$GDAY_MOTD" 2>/dev/null; then
+  if grep -q "g’day" "$GDAY_MOTD" 2>/dev/null; then
     say "clearing $GDAY_MOTD"
     > "$GDAY_MOTD"
   fi

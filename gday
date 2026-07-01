@@ -101,7 +101,7 @@ gday::_cached() {
 
 gday::footer() {
   render::rule
-  printf "g'day · generated %s\n" "$(date '+%Y-%m-%d %H:%M')"
+  printf "g’day v%s · generated %s\n" "$GDAY_VERSION" "$(date '+%Y-%m-%d %H:%M')"
 }
 
 gday::assemble() {
@@ -170,7 +170,7 @@ main() {
     --updates)     gday::build_updates ;;
     --write-motd)  gday::write_motd ;;
     --section)     [[ $# -ge 2 ]] || { gday::usage >&2; exit 2; }; gday::one_section "$2" ;;
-    --version)     printf "g'day %s\n" "$GDAY_VERSION" ;;
+    --version)     printf "g’day %s\n" "$GDAY_VERSION" ;;
     -h|--help)     gday::usage ;;
     *)             gday::usage >&2; exit 2 ;;
   esac

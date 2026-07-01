@@ -39,12 +39,18 @@ status::services() {
   n=$(printf '%s' "$out" | grep -c '[^[:space:]]' || true)
   if (( n > 0 )); then
     render::status "$GDAY_FAULT" "${n} failed unit$([[ $n -ne 1 ]] && printf s)"
-    local line name
+    local line name first=''
     while IFS= read -r line; do
       [[ -n $line ]] || continue
       name=${line%%[[:space:]]*}
+      [[ -z $first ]] && first=$name
       render::cont "$name"
     done <<< "$out"
+    if (( n == 1 )) && [[ -n $first ]]; then
+      render::cont "→ systemctl status $first"
+    else
+      render::cont "→ systemctl --failed"
+    fi
   else
     render::status "$GDAY_OK" 'No failed units'
   fi

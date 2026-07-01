@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test/run.sh — smoke-test runner for g'day.
+# test/run.sh — smoke-test runner for g’day.
 #
 # Drives every section against each fixture set under test/fixtures*/,
 # plus any test/capture-*/ dirs present. Prints a PASS/FAIL summary;
@@ -102,7 +102,7 @@ for fdir in "${fixture_dirs[@]}"; do
   # ── Full assemble ────────────────────────────────────────────────────────
   section=''
   run_assemble "assemble/full" "$fdir" \
-    "HARDWARE" "DISK USAGE" "OPERATING SYSTEM" "STATUS" "g'day · generated"
+    "HARDWARE" "DISK USAGE" "OPERATING SYSTEM" "STATUS" "g’day · generated"
 
   # ── Banner ───────────────────────────────────────────────────────────────
   section=banner
@@ -223,7 +223,7 @@ rm -rf "$sparse" "$sparse_var"
 
 # Assembly must produce output with all key sections present (§5).
 if grep -qF 'HARDWARE' <<< "$out" && grep -qF 'DISK USAGE' <<< "$out" && \
-   grep -qF 'OPERATING SYSTEM' <<< "$out" && grep -qF "g'day" <<< "$out"; then
+   grep -qF 'OPERATING SYSTEM' <<< "$out" && grep -qF "g’day" <<< "$out"; then
   ok "degraded/assembly-succeeds-with-sparse-fixtures"
 else
   fail "degraded/assembly-succeeds-with-sparse-fixtures"
