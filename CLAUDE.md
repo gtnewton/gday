@@ -303,6 +303,19 @@ avoid parsing `ls`; avoid needless subshells. MUST NOT use `eval`.
 - No repeated expensive probes within a run; resolve once, reuse.
 - (No fixed millisecond targets — unmeasurable on unknown hardware.)
 
+Rejected-alternative note: detecting whether a running Docker container has
+an image update available was considered for the Docker status plugin and
+declined — not deferred, declined. The only way to know if a *newer* image
+exists upstream is a registry query (`docker manifest inspect` or equivalent),
+which is exactly the network access this rule forbids. A no-network variant
+is possible — compare a container's actual image ID against what its tag
+currently resolves to locally, the same trick `status::reboot`'s generic
+fallback already uses for kernels — but that only catches "already pulled,
+not yet applied," not a genuinely new upstream release, and was judged not
+useful enough on its own to add. If this is proposed again: the network
+version conflicts with this rule; the no-network version is buildable but was
+a deliberate no.
+
 ## 19. CLI surface
 
 - `gday` — print assembled output to stdout (test/preview; does not write
