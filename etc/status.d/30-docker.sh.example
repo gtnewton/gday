@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 30-docker.sh.example — g'day status plugin: Docker container summary.
+# 30-docker.sh.example — g'day status plugin: Docker container listing.
 #
 # To activate: copy to /etc/gday/status.d/30-docker.sh, make executable.
 # Requires the gday service user to be in the docker group, or run as root.
@@ -9,12 +9,61 @@
 
 set -uo pipefail
 
-row() { printf '   %-12s %s\n' "$1" "$2"; }
+# Containers listed inline before falling back to a "+N more" pointer.
+DOCKER_INLINE_N=${DOCKER_INLINE_N:-8}
+
+row()  { printf '   %-12s %s\n' "$1" "$2"; }
+cont() { printf '   %-12s %s\n' '' "$1"; }
+
+# _sanitize <text> — strip control bytes (ANSI/terminal escape sequences)
+# before they reach /etc/motd. Container names/images are admin-controlled,
+# but this plugin runs as root every refresh, so treat them as untrusted
+# output regardless — same discipline as render::sanitize in lib/render.sh.
+_sanitize() { printf '%s' "$1" | tr -d '\000-\037\177'; }
+
+# _trunc <text> <max> — clip to <max> chars with a trailing ellipsis, so one
+# long name/image/status can't blow out the row width (no wrap helper here:
+# this plugin runs as its own process, not sourced into gday, and GDAY_LIB
+# isn't exported — see the render::wrap-style helpers in lib/render.sh for
+# the core-section equivalent).
+_trunc() {
+  local s=$1 max=$2
+  if (( ${#s} > max )); then printf '%s…' "${s:0:max-1}"; else printf '%s' "$s"; fi
+}
 
 command -v docker >/dev/null 2>&1 || exit 0
 docker info >/dev/null 2>&1       || exit 0   # skip if daemon not running
 
-total=$(docker ps -q 2>/dev/null | wc -l) || exit 0
-(( total > 0 )) || { row 'Docker' 'no containers running'; exit 0; }
+listing=$(docker ps -a --format $'{{.Names}}\t{{.Image}}\t{{.State}}\t{{.Status}}' 2>/dev/null) || exit 0
+[[ -n $listing ]] || { row 'Docker' 'no containers'; exit 0; }
 
-row 'Docker' "${total} container$([[ $total -ne 1 ]] && printf s) running"
+total=0 running=0
+lines=()
+while IFS=$'\t' read -r name image state status; do
+  [[ -n $name ]] || continue
+  (( total++ ))
+  [[ $state == running ]] && (( running++ ))
+  name=$(_trunc "$(_sanitize "$name")" 16)
+  image=$(_trunc "$(_sanitize "$image")" 20)
+  status=$(_trunc "$(_sanitize "$status")" 16)
+  lines+=("${name} — ${image} (${status})")
+done <<< "$listing"
+
+(( total > 0 )) || { row 'Docker' 'no containers'; exit 0; }
+
+stopped=$(( total - running ))
+if (( stopped > 0 )); then
+  row 'Docker' "${running} running, ${stopped} stopped"
+else
+  row 'Docker' "${running} container$([[ $running -ne 1 ]] && printf s) running"
+fi
+
+shown=0
+for line in "${lines[@]}"; do
+  (( shown >= DOCKER_INLINE_N )) && break
+  cont "  ${line}"
+  (( shown++ ))
+done
+if (( total > DOCKER_INLINE_N )); then
+  cont "  … +$(( total - DOCKER_INLINE_N )) more (docker ps -a)"
+fi

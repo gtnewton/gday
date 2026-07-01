@@ -144,7 +144,9 @@ Example plugins (inert until activated) are installed to `/etc/gday/status.d/`:
 
 - `10-restic.sh.example` — last restic backup age
 - `20-snapraid.sh.example` — last SnapRAID sync age
-- `30-docker.sh.example` — running container count
+- `30-docker.sh.example` — running/stopped container counts, with a name +
+  image + status line per container (capped, with a pointer to `docker ps -a`
+  once there are more than fit inline)
 
 To activate: copy to the same directory without `.example`, set the execute
 bit, and configure the variables at the top of the file.
