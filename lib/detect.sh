@@ -65,12 +65,16 @@ detect::_seat0_session() {
 detect::desktop() {
   GDAY_DE='' GDAY_SESSION='' GDAY_HEADLESS=1
   local v
-  if [[ -n $(gday::probe gnome-shell gnome-shell --version) ]]; then
-    v=$(gday::probe gnome-shell gnome-shell --version); v=${v##* }
+  v=$(gday::probe gnome-shell gnome-shell --version)
+  if [[ -n $v ]]; then
+    v=${v##* }
     GDAY_DE="GNOME ${v}"
-  elif [[ -n $(gday::probe plasmashell plasmashell --version) ]]; then
-    v=$(gday::probe plasmashell plasmashell --version); v=${v##* }
-    GDAY_DE="KDE Plasma ${v}"
+  else
+    v=$(gday::probe plasmashell plasmashell --version)
+    if [[ -n $v ]]; then
+      v=${v##* }
+      GDAY_DE="KDE Plasma ${v}"
+    fi
   fi
 
   local sid t

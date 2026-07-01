@@ -13,6 +13,20 @@ GDAY_HARDWARE_SH=1
 # hw::_probe — thin alias over the shared probe seam (render.sh).
 hw::_probe() { gday::probe "$@"; }
 
+# hw::_lsblk_out — memoized lsblk probe, one call per process. hw::storage and
+# hw::smart_build both need this exact field set; without memoizing, a single
+# `gday::build_static` run invoked lsblk twice (§18: no repeated expensive
+# probes within a run).
+HW_LSBLK_CACHED=0
+HW_LSBLK_CACHE=''
+hw::_lsblk_out() {
+  if [[ $HW_LSBLK_CACHED -eq 0 ]]; then
+    HW_LSBLK_CACHE=$(hw::_probe lsblk lsblk -d -e7 -n -o NAME,MODEL,SERIAL,SIZE,TYPE)
+    HW_LSBLK_CACHED=1
+  fi
+  printf '%s' "$HW_LSBLK_CACHE"
+}
+
 # hw::_dmi_field <text> <Field Name> — value from a `dmidecode -t` block.
 hw::_dmi_field() {
   local block=$1 field=$2 line val
@@ -152,7 +166,7 @@ hw::gpu() {
 # hw::storage — one row per real disk from `lsblk`; serials are root-only.
 hw::storage() {
   local out line name model serial size type first=1
-  out=$(hw::_probe lsblk lsblk -d -e7 -n -o NAME,MODEL,SERIAL,SIZE,TYPE)
+  out=$(hw::_lsblk_out)
   [[ -n $out ]] || return 0
   # Collapse lsblk's column-padding (multiple spaces) to single spaces so
   # back-word parsing of TYPE, SIZE, SERIAL is not confused by trailing spaces.
@@ -194,7 +208,7 @@ hw::smart_build() {
     command -v smartctl >/dev/null 2>&1 || return 0
   fi
   local lsblk_out line name rest type tmp result
-  lsblk_out=$(hw::_probe lsblk lsblk -d -e7 -n -o NAME,MODEL,SERIAL,SIZE,TYPE)
+  lsblk_out=$(hw::_lsblk_out)
   [[ -n $lsblk_out ]] || return 0
   lsblk_out=$(awk '{$1=$1; print}' <<< "$lsblk_out")
   tmp=$(mktemp "${GDAY_VAR}/.smart.XXXXXX") || return 0
