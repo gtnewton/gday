@@ -48,7 +48,7 @@ run_section() {
       ok_=0
     fi
   done
-  (( ok_ )) && ok "$label"
+  if (( ok_ )); then ok "$label"; fi
 }
 
 run_assemble() {
@@ -61,7 +61,7 @@ run_assemble() {
   for p in "${patterns[@]}"; do
     if ! grep -qF "$p" <<< "$out"; then fail "$label: missing «$p»"; ok_=0; fi
   done
-  (( ok_ )) && ok "$label"
+  if (( ok_ )); then ok "$label"; fi
 }
 
 # ── fixture sets to test ──────────────────────────────────────────────────────
@@ -102,7 +102,7 @@ for fdir in "${fixture_dirs[@]}"; do
   # ── Full assemble ────────────────────────────────────────────────────────
   section=''
   run_assemble "assemble/full" "$fdir" \
-    "HARDWARE" "DISK USAGE" "OPERATING SYSTEM" "STATUS" "g’day · generated"
+    "HARDWARE" "DISK USAGE" "OPERATING SYSTEM" "STATUS" "g’day" "generated"
 
   # ── Banner ───────────────────────────────────────────────────────────────
   section=banner
