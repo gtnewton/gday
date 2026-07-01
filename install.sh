@@ -13,6 +13,7 @@ GDAY_SYSTEMD=/etc/systemd/system
 GDAY_MOTD=/etc/motd
 GDAY_CONF="$GDAY_ETC/gday.conf"
 ROLLBACK="$GDAY_VAR/install-rollback.txt"
+MOTD_BACKUP="$GDAY_VAR/motd.orig"
 
 SCRIPT_DIR=$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
@@ -114,9 +115,20 @@ done
 # new value — the standard pattern for overriding OnCalendar/OnUnitActiveSec.
 _cadence_dropin() {
   local dropin=$1; shift   # remaining args: "KEY=value" lines to emit
-  mkdir -p "$(dirname "$dropin")"
+  local dir; dir=$(dirname "$dropin")
+  mkdir -p "$dir"
+  chown root:root "$dir"   # explicit, not umask-dependent (§17) — same
+  chmod 0755 "$dir"        # discipline as $GDAY_ETC/status.d
   { printf '[Timer]\n'; printf '%s\n' "$@"; } > "$dropin"
   chmod 0644 "$dropin"
+}
+
+# _cadence_clear <dropin> — remove a stale override left by a previous install
+# whose gday.conf has since reverted to the default; without this, re-running
+# install.sh with a since-removed override left the old cadence in effect
+# forever (idempotency requires converging to the *current* config, §20).
+_cadence_clear() {
+  [[ -e $1 ]] && { say "clearing stale cadence override → $1"; rm -f "$1"; }
 }
 
 if [[ $GDAY_STATIC_ONCALENDAR != daily || $GDAY_STATIC_ONBOOTSEC != 30s ]]; then
@@ -124,18 +136,24 @@ if [[ $GDAY_STATIC_ONCALENDAR != daily || $GDAY_STATIC_ONBOOTSEC != 30s ]]; then
   _cadence_dropin "$GDAY_SYSTEMD/gday-static.timer.d/cadence.conf" \
     "OnBootSec=" "OnCalendar=" \
     "OnBootSec=$GDAY_STATIC_ONBOOTSEC" "OnCalendar=$GDAY_STATIC_ONCALENDAR"
+else
+  _cadence_clear "$GDAY_SYSTEMD/gday-static.timer.d/cadence.conf"
 fi
 
 if [[ $GDAY_UPDATES_ONCALENDAR != hourly ]]; then
   say "applying updates cadence override"
   _cadence_dropin "$GDAY_SYSTEMD/gday-updates.timer.d/cadence.conf" \
     "OnCalendar=" "OnCalendar=$GDAY_UPDATES_ONCALENDAR"
+else
+  _cadence_clear "$GDAY_SYSTEMD/gday-updates.timer.d/cadence.conf"
 fi
 
 if [[ $GDAY_REFRESH_INTERVAL != 5min ]]; then
   say "applying refresh cadence override"
   _cadence_dropin "$GDAY_SYSTEMD/gday-refresh.timer.d/cadence.conf" \
     "OnUnitActiveSec=" "OnUnitActiveSec=$GDAY_REFRESH_INTERVAL"
+else
+  _cadence_clear "$GDAY_SYSTEMD/gday-refresh.timer.d/cadence.conf"
 fi
 
 # ── Activate ─────────────────────────────────────────────────────────────────
@@ -144,6 +162,17 @@ systemctl daemon-reload
 
 say "enabling and starting timers"
 systemctl enable --now gday-static.timer gday-updates.timer gday-refresh.timer
+
+# ── Preserve any pre-existing /etc/motd ──────────────────────────────────────
+# Some distros ship a stock /etc/motd (e.g. a security/legal banner). We're
+# about to overwrite it and never touch it again on reinstall (the check
+# below only fires while it's not already ours), so back it up once now —
+# otherwise uninstall.sh has nothing to restore and can only blank the file.
+if [[ -f $GDAY_MOTD && ! -f $MOTD_BACKUP ]] && ! grep -q "g’day" "$GDAY_MOTD" 2>/dev/null; then
+  say "backing up pre-existing $GDAY_MOTD → $MOTD_BACKUP"
+  cp -p -- "$GDAY_MOTD" "$MOTD_BACKUP"
+  chmod 0644 "$MOTD_BACKUP"
+fi
 
 # ── Initial population ───────────────────────────────────────────────────────
 say "running static tier to populate caches"

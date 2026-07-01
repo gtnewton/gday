@@ -13,6 +13,7 @@ GDAY_VAR=/var/lib/gday
 GDAY_SYSTEMD=/etc/systemd/system
 GDAY_MOTD=/etc/motd
 ROLLBACK="$GDAY_VAR/install-rollback.txt"
+MOTD_BACKUP="$GDAY_VAR/motd.orig"
 
 PURGE=0
 for arg in "$@"; do [[ $arg == --purge ]] && PURGE=1; done
@@ -37,6 +38,10 @@ done
 systemctl daemon-reload
 
 # ── Restore update-motd.d ─────────────────────────────────────────────────────
+# The rollback record is removed once consumed — otherwise a later reinstall's
+# idempotency check (install.sh: "skip if already recorded") would see the
+# stale entry and refuse to re-neutralise scripts we just restored here,
+# leaving update-motd.d silently re-enabled after an uninstall+reinstall (§3).
 if [[ -r $ROLLBACK ]]; then
   say "restoring update-motd.d scripts"
   while IFS= read -r line; do
@@ -44,13 +49,19 @@ if [[ -r $ROLLBACK ]]; then
     f=${line#motd.d:}
     [[ -f $f ]] && chmod +x "$f" && say "  restored $f"
   done < "$ROLLBACK"
+  rm -f "$ROLLBACK"
 fi
 
-# ── Clear /etc/motd if we own it ─────────────────────────────────────────────
+# ── Restore or clear /etc/motd if we own it ──────────────────────────────────
 if [[ -f $GDAY_MOTD ]]; then
   if grep -q "g’day" "$GDAY_MOTD" 2>/dev/null; then
-    say "clearing $GDAY_MOTD"
-    > "$GDAY_MOTD"
+    if [[ -f $MOTD_BACKUP ]]; then
+      say "restoring original $GDAY_MOTD"
+      mv -f "$MOTD_BACKUP" "$GDAY_MOTD"
+    else
+      say "clearing $GDAY_MOTD"
+      > "$GDAY_MOTD"
+    fi
   fi
 fi
 
