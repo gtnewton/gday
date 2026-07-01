@@ -98,17 +98,30 @@ render::header() {
   fi
 }
 
+# render::sanitize <text> — strip ASCII control bytes (0x00–0x1F, 0x7F) so
+# externally-sourced text (dmidecode/lsblk/lspci fields, plugin stdout) can't
+# carry terminal escape sequences into /etc/motd, which is displayed at every
+# login (§17: external output is data, never code — this is the terminal-
+# injection variant of that rule). UTF-8 multibyte sequences are untouched:
+# every continuation/lead byte is ≥0x80, outside the stripped range, so this
+# is safe to run byte-wise over Unicode/emoji content.
+render::sanitize() {
+  printf '%s' "$1" | tr -d '\000-\037\177'
+}
+
 # render::row <label> <value> — §9 body row: three-space indent, fixed-width
 # label column, value follows. THE shared alignment helper for core + plugins.
 render::row() {
-  local label=$1 value=$2
+  local label=$1 value
+  value=$(render::sanitize "$2")
   printf '   %-*s %s\n' "$GDAY_LABEL_WIDTH" "$label" "$value"
 }
 
 # render::cont <value> — a continuation line aligned under the value column,
 # for wrapping long values within the indent rather than overflowing (§9).
 render::cont() {
-  local value=$1
+  local value
+  value=$(render::sanitize "$1")
   printf '   %-*s %s\n' "$GDAY_LABEL_WIDTH" '' "$value"
 }
 
@@ -116,7 +129,8 @@ render::cont() {
 # glyph, two spaces, message. The shared form for core status rows and plugins.
 # When GDAY_EMOJI=0, glyphs are replaced with plain ASCII markers.
 render::status() {
-  local glyph=$1 text=$2
+  local glyph=$1 text
+  text=$(render::sanitize "$2")
   if [[ ${GDAY_EMOJI:-1} == 0 ]]; then
     case $glyph in
       "$GDAY_OK")    glyph='[ok]'  ;;

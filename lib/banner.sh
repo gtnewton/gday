@@ -6,13 +6,15 @@
 [[ -n ${GDAY_BANNER_SH:-} ]] && return 0
 GDAY_BANNER_SH=1
 
-# banner::_hostname — short hostname, with fallbacks.
+# banner::_hostname — short hostname, with fallbacks. Sanitized (§17): a
+# rogue DHCP server can set an arbitrary hostname, and this value is embedded
+# literally in the figlet/box art and subtitle line below.
 banner::_hostname() {
   local h
   h=$(gday::probe hostname hostname -s)
   [[ -n $h ]] || h=$(uname -n 2>/dev/null)
   h=${h%%.*}
-  printf '%s' "${h:-localhost}"
+  render::sanitize "${h:-localhost}"
 }
 
 # banner::_art <host> — the figlet/toilet art, or the bordered fallback.

@@ -54,7 +54,12 @@ for lib in "$SCRIPT_DIR/lib/"*.sh; do
 done
 
 # ── Config ───────────────────────────────────────────────────────────────────
+# Explicit ownership/mode rather than relying on umask (§17) — status.d below
+# holds executables that run as root every 5 minutes, so a permissive umask
+# (e.g. 0 or 002) must not leave it group/other-writable.
 mkdir -p "$GDAY_ETC"
+chown root:root "$GDAY_ETC"
+chmod 0755 "$GDAY_ETC"
 if [[ ! -f $GDAY_CONF ]]; then
   say "installing default config → $GDAY_CONF"
   install_file "$SCRIPT_DIR/etc/gday.conf" "$GDAY_CONF" 0644
@@ -64,6 +69,8 @@ fi
 
 # ── Plugin examples ──────────────────────────────────────────────────────────
 mkdir -p "$GDAY_ETC/status.d"
+chown root:root "$GDAY_ETC/status.d"
+chmod 0755 "$GDAY_ETC/status.d"
 for ex in "$SCRIPT_DIR/etc/status.d/"*.sh.example; do
   [[ -f $ex ]] || continue
   dst="$GDAY_ETC/status.d/$(basename "$ex")"

@@ -75,17 +75,38 @@ status::disks() {
   fi
 }
 
+# status::_plugin_safe <path> — defense-in-depth (§17): status.d executables
+# run with this process's privileges (root, under the shipped systemd
+# service). Require the same discipline as sudoers.d — owned by root or the
+# invoking user, never group/other-writable — so a local user who somehow got
+# write access to the directory or a file in it can't plant or swap a script
+# that then runs as root every 5 minutes.
+status::_plugin_safe() {
+  local path=$1 owner perm
+  owner=$(stat -c '%u' "$path" 2>/dev/null) || return 1
+  perm=$(stat -c '%a' "$path" 2>/dev/null) || return 1
+  [[ $owner == 0 || $owner == "${EUID:-$(id -u)}" ]] || return 1
+  (( 8#$perm & 0022 )) && return 1
+  return 0
+}
+
 # status::plugins — run executables in status.d in filename order; append their
-# stdout verbatim. A plugin that exits non-zero or prints nothing is skipped (§12).
+# stdout verbatim (control bytes stripped per line — §17: a plugin reading an
+# attacker-influenced log could otherwise carry terminal escape sequences into
+# /etc/motd). A plugin that exits non-zero or prints nothing is skipped (§12).
 status::plugins() {
   local dir=${GDAY_PLUGIN_DIR:-/etc/gday/status.d}
   [[ -d $dir ]] || return 0
-  local f out
+  status::_plugin_safe "$dir" || return 0
+  local f out line
   for f in "$dir"/*; do
     [[ -f $f && -x $f ]] || continue
+    status::_plugin_safe "$f" || continue
     out=$("$f" 2>/dev/null) || continue
     [[ -n $out ]] || continue
-    printf '%s\n' "$out"
+    while IFS= read -r line || [[ -n $line ]]; do
+      printf '%s\n' "$(render::sanitize "$line")"
+    done <<< "$out"
   done
 }
 
