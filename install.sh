@@ -105,6 +105,28 @@ if [[ -d /etc/update-motd.d ]]; then
   done
 fi
 
+# ── Debian/Ubuntu: disable motd-news.timer ───────────────────────────────────
+# motd-news.timer periodically re-fires motd-news.service to fetch Canonical's
+# promotional MOTD news snippet over the network — part of the same redundant
+# Ubuntu MOTD machinery the update-motd.d neutralisation above already
+# targets, but independent of that script's execute bit: left alone, it keeps
+# firing on its own schedule and (commonly, e.g. no/restricted outbound
+# internet) failing, showing up as permanent noise in gday's own STATUS
+# section rather than a duplicated banner. Only touched if the unit actually
+# exists and is currently enabled/active; recorded so uninstall.sh restores
+# it, same discipline as the update-motd.d scripts above.
+if systemctl list-unit-files motd-news.timer --no-legend 2>/dev/null | grep -q .; then
+  touch "$ROLLBACK"
+  motd_news_active=0
+  systemctl is-enabled --quiet motd-news.timer 2>/dev/null && motd_news_active=1
+  systemctl is-active --quiet motd-news.timer 2>/dev/null && motd_news_active=1
+  if (( motd_news_active )) && ! grep -qF 'unit:motd-news.timer' "$ROLLBACK" 2>/dev/null; then
+    say "disabling motd-news.timer (Ubuntu's motd-news fetcher; redundant with gday, commonly fails without outbound internet)"
+    systemctl disable --now motd-news.timer 2>/dev/null || true
+    printf 'unit:motd-news.timer\n' >> "$ROLLBACK"
+  fi
+fi
+
 # ── systemd units ────────────────────────────────────────────────────────────
 say "installing systemd units → $GDAY_SYSTEMD"
 for unit in "$SCRIPT_DIR/systemd/"*; do
@@ -194,6 +216,14 @@ say "done"
 # else is available, rather than relying on the user to remember or go look
 # it up in README/CLAUDE.md.
 motd_d_count=$(grep -c '^motd\.d:' "$ROLLBACK" 2>/dev/null || printf 0)
+motd_news_status='n/a — not present on this system'
+if systemctl list-unit-files motd-news.timer --no-legend 2>/dev/null | grep -q .; then
+  if grep -qF 'unit:motd-news.timer' "$ROLLBACK" 2>/dev/null; then
+    motd_news_status='disabled (was firing and failing; restored on uninstall)'
+  else
+    motd_news_status='present, already inactive — left as-is'
+  fi
+fi
 echo
 echo "════════════════════════════════════════════════════════════════════"
 echo " g'day installed"
@@ -211,6 +241,7 @@ if [[ -d /etc/update-motd.d ]]; then
 else
   echo "  update-motd.d   n/a — not present on this system"
 fi
+echo "  motd-news.timer ${motd_news_status}"
 echo
 echo "  Preview now:     gday"
 echo "  Change cadence:  edit $GDAY_CONF, then re-run this script"

@@ -63,8 +63,15 @@ Settled. Do not relitigate during the build.
   prefers `/run/motd.dynamic` built from `/etc/update-motd.d/`, which would
   override or duplicate our `/etc/motd`. The installer disables the stock
   dynamic scripts (drop the execute bit; MUST NOT delete) and records the
-  change for clean rollback. This is the only surviving per-distro install
-  wrinkle.
+  change for clean rollback.
+- **Ubuntu install SHOULD disable `motd-news.timer`, if present and
+  active.** Independent of the `update-motd.d` script's execute bit, this
+  timer periodically re-fires `motd-news.service` to fetch Canonical's
+  promotional MOTD content over the network — redundant with g'day and,
+  commonly (no/restricted outbound internet), left permanently failing,
+  polluting g'day's own STATUS section with unrelated noise. Only touched
+  if currently enabled/active (never assume); recorded for rollback the
+  same way as `update-motd.d`, sharing the same rollback file.
 
 ## 4. Conventions
 
@@ -366,11 +373,12 @@ a deliberate no.
   MUST cause install.sh to remove the corresponding `.timer.d/cadence.conf`
   drop-in, not just skip creating a new one — otherwise a reverted config
   value silently has no effect.
-- **Rollback state recorded** (the Debian `update-motd.d` change; the
-  pre-existing `/etc/motd`, if any, backed up to `$GDAY_VAR/motd.orig` before
-  first being overwritten) so uninstall restores the prior state — re-enable
-  the stock scripts, restore original `/etc/motd` content (or blank it if
-  there was none), remove units and reload systemd.
+- **Rollback state recorded** (the Debian `update-motd.d` change; Ubuntu's
+  `motd-news.timer` disable; the pre-existing `/etc/motd`, if any, backed up
+  to `$GDAY_VAR/motd.orig` before first being overwritten) so uninstall
+  restores the prior state — re-enable the stock scripts and the timer,
+  restore original `/etc/motd` content (or blank it if there was none),
+  remove units and reload systemd.
 - **Rollback records MUST be consumed, not left behind.** Once uninstall.sh
   has restored a script's exec bit from `install-rollback.txt`, it MUST clear
   that record — otherwise a later reinstall's "already handled" idempotency

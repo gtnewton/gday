@@ -27,6 +27,7 @@ say() { printf 'uninstall: %s\n' "$*"; }
 # reconstructed later for the final report).
 RESTORED_MOTD_D=()
 MOTD_OUTCOME='not present'
+MOTD_NEWS_RESTORED=0
 
 # ── Stop and disable timers ───────────────────────────────────────────────────
 # Only the *.timer units have an [Install] section (WantedBy=timers.target) —
@@ -52,21 +53,29 @@ for unit in gday-static gday-updates gday-refresh; do
 done
 systemctl daemon-reload
 
-# ── Restore update-motd.d ─────────────────────────────────────────────────────
+# ── Restore update-motd.d + motd-news.timer ──────────────────────────────────
 # The rollback record is removed once consumed — otherwise a later reinstall's
 # idempotency check (install.sh: "skip if already recorded") would see the
-# stale entry and refuse to re-neutralise scripts we just restored here,
-# leaving update-motd.d silently re-enabled after an uninstall+reinstall (§3).
+# stale entry and refuse to re-neutralise/re-disable what we just restored
+# here, leaving it silently re-enabled after an uninstall+reinstall (§3).
 if [[ -r $ROLLBACK ]]; then
-  say "restoring update-motd.d scripts"
+  say "restoring update-motd.d scripts and motd-news.timer"
   while IFS= read -r line; do
-    [[ $line == motd.d:* ]] || continue
-    f=${line#motd.d:}
-    if [[ -f $f ]]; then
-      chmod +x "$f"
-      say "  restored $f"
-      RESTORED_MOTD_D+=("$f")
-    fi
+    case $line in
+      motd.d:*)
+        f=${line#motd.d:}
+        if [[ -f $f ]]; then
+          chmod +x "$f"
+          say "  restored $f"
+          RESTORED_MOTD_D+=("$f")
+        fi
+        ;;
+      unit:motd-news.timer)
+        say "  re-enabling motd-news.timer"
+        systemctl enable --now motd-news.timer 2>/dev/null || true
+        MOTD_NEWS_RESTORED=1
+        ;;
+    esac
   done < "$ROLLBACK"
   rm -f "$ROLLBACK"
 fi
@@ -142,6 +151,15 @@ for f in "${RESTORED_MOTD_D[@]:-}"; do
     printf '  ❌ %-16s NOT executable: %s\n' "update-motd.d" "$f"
   fi
 done
+
+if (( MOTD_NEWS_RESTORED )); then
+  if systemctl is-enabled --quiet motd-news.timer 2>/dev/null; then
+    printf '  ✅ %-16s re-enabled\n' "motd-news.timer"
+  else
+    FAILURES+=("motd-news.timer was not successfully re-enabled")
+    printf '  ❌ %-16s NOT re-enabled\n' "motd-news.timer"
+  fi
+fi
 
 if [[ -f $GDAY_MOTD ]] && grep -q "g’day" "$GDAY_MOTD" 2>/dev/null; then
   FAILURES+=("$GDAY_MOTD still contains gday's content")
