@@ -22,6 +22,12 @@ for arg in "$@"; do [[ $arg == --purge ]] && PURGE=1; done
 
 say() { printf 'uninstall: %s\n' "$*"; }
 
+# Action log, captured as the script runs (some of this — notably ROLLBACK —
+# gets deleted before the script ends, so it must be recorded now, not
+# reconstructed later for the final report).
+RESTORED_MOTD_D=()
+MOTD_OUTCOME='not present'
+
 # ── Stop and disable timers ───────────────────────────────────────────────────
 for unit in gday-static.timer gday-updates.timer gday-refresh.timer \
             gday-static.service gday-updates.service gday-refresh.service; do
@@ -47,7 +53,11 @@ if [[ -r $ROLLBACK ]]; then
   while IFS= read -r line; do
     [[ $line == motd.d:* ]] || continue
     f=${line#motd.d:}
-    [[ -f $f ]] && chmod +x "$f" && say "  restored $f"
+    if [[ -f $f ]]; then
+      chmod +x "$f"
+      say "  restored $f"
+      RESTORED_MOTD_D+=("$f")
+    fi
   done < "$ROLLBACK"
   rm -f "$ROLLBACK"
 fi
@@ -58,10 +68,14 @@ if [[ -f $GDAY_MOTD ]]; then
     if [[ -f $MOTD_BACKUP ]]; then
       say "restoring original $GDAY_MOTD"
       mv -f "$MOTD_BACKUP" "$GDAY_MOTD"
+      MOTD_OUTCOME='restored to its pre-install content'
     else
       say "clearing $GDAY_MOTD"
       > "$GDAY_MOTD"
+      MOTD_OUTCOME='cleared (no pre-install backup existed to restore)'
     fi
+  else
+    MOTD_OUTCOME="left untouched (didn't contain gday's content)"
   fi
 fi
 
@@ -78,4 +92,85 @@ else
   say "config and caches preserved (run with --purge to remove)"
 fi
 
-say "done"
+# ── Verification ─────────────────────────────────────────────────────────────
+# Re-check the actual filesystem/systemd state rather than assuming the steps
+# above worked — "no trace left" should be a checked fact, not an assertion.
+say "verifying removal"
+FAILURES=()
+
+check_gone() {
+  local label=$1 path=$2
+  if [[ -e $path ]]; then
+    FAILURES+=("$label still present: $path")
+    printf '  ❌ %-16s still present: %s\n' "$label" "$path"
+  else
+    printf '  ✅ %-16s gone\n' "$label"
+  fi
+}
+
+check_gone "binary" "$GDAY_BIN"
+check_gone "libraries" "$GDAY_LIB_DIR"
+for unit in gday-static gday-updates gday-refresh; do
+  check_gone "${unit}.service"   "$GDAY_SYSTEMD/${unit}.service"
+  check_gone "${unit}.timer"    "$GDAY_SYSTEMD/${unit}.timer"
+  check_gone "${unit}.service.d" "$GDAY_SYSTEMD/${unit}.service.d"
+  check_gone "${unit}.timer.d"   "$GDAY_SYSTEMD/${unit}.timer.d"
+done
+
+if systemctl list-unit-files 2>/dev/null | grep -q '^gday-'; then
+  FAILURES+=("systemd still lists one or more gday-* units")
+  printf '  ❌ %-16s systemd still lists gday-* unit(s)\n' "systemd"
+else
+  printf '  ✅ %-16s systemd no longer lists any gday-* unit\n' "systemd"
+fi
+
+for f in "${RESTORED_MOTD_D[@]:-}"; do
+  [[ -n $f ]] || continue
+  if [[ -x $f ]]; then
+    printf '  ✅ %-16s executable again: %s\n' "update-motd.d" "$f"
+  else
+    FAILURES+=("update-motd.d script not restored: $f")
+    printf '  ❌ %-16s NOT executable: %s\n' "update-motd.d" "$f"
+  fi
+done
+
+if [[ -f $GDAY_MOTD ]] && grep -q "g’day" "$GDAY_MOTD" 2>/dev/null; then
+  FAILURES+=("$GDAY_MOTD still contains gday's content")
+  printf '  ❌ %-16s still contains gday content\n' "/etc/motd"
+else
+  printf '  ✅ %-16s %s\n' "/etc/motd" "$MOTD_OUTCOME"
+fi
+
+if (( PURGE )); then
+  check_gone "config dir" "$GDAY_ETC"
+  check_gone "cache dir"  "$GDAY_VAR"
+else
+  [[ -d $GDAY_ETC ]] && printf '  ℹ️  %-16s preserved (as requested): %s\n' "config dir" "$GDAY_ETC"
+  [[ -d $GDAY_VAR ]] && printf '  ℹ️  %-16s preserved (as requested): %s\n' "cache dir"  "$GDAY_VAR"
+fi
+
+# ── Verdict ──────────────────────────────────────────────────────────────────
+echo
+if (( ${#FAILURES[@]} == 0 )); then
+  if (( PURGE )); then
+    say "done — no trace of gday remains"
+  else
+    say "done — gday fully removed (config and caches intentionally preserved, see below)"
+  fi
+else
+  say "done, with ${#FAILURES[@]} problem(s) — gday is NOT fully removed:"
+  for f in "${FAILURES[@]}"; do
+    printf '   - %s\n' "$f"
+  done
+fi
+
+if ! (( PURGE )); then
+  echo
+  echo "────────────────────────────────────────────────────────────────────"
+  echo "NOTE: config ($GDAY_ETC) and caches ($GDAY_VAR) were left in place."
+  echo "To remove those too:"
+  echo "    sudo ./uninstall.sh --purge"
+  echo "────────────────────────────────────────────────────────────────────"
+fi
+
+(( ${#FAILURES[@]} == 0 ))

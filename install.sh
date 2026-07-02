@@ -64,8 +64,10 @@ chmod 0755 "$GDAY_ETC"
 if [[ ! -f $GDAY_CONF ]]; then
   say "installing default config → $GDAY_CONF"
   install_file "$SCRIPT_DIR/etc/gday.conf" "$GDAY_CONF" 0644
+  CONFIG_STATUS='newly installed'
 else
   say "existing config preserved at $GDAY_CONF"
+  CONFIG_STATUS='existing, preserved'
 fi
 
 # ── Plugin examples ──────────────────────────────────────────────────────────
@@ -184,4 +186,34 @@ say "running updates tier"
 say "writing initial /etc/motd"
 "$GDAY_BIN" --write-motd || true
 
-say "done. Preview with: gday"
+say "done"
+
+# ── Summary report ───────────────────────────────────────────────────────────
+# Installers are run rarely enough that flags/behaviour are easy to forget
+# between uses — spell out what actually changed on this machine, and what
+# else is available, rather than relying on the user to remember or go look
+# it up in README/CLAUDE.md.
+motd_d_count=$(grep -c '^motd\.d:' "$ROLLBACK" 2>/dev/null || printf 0)
+echo
+echo "════════════════════════════════════════════════════════════════════"
+echo " g'day installed"
+echo "════════════════════════════════════════════════════════════════════"
+echo "  binary          $GDAY_BIN"
+echo "  libraries       $GDAY_LIB_DIR"
+echo "  config          $GDAY_CONF  ($CONFIG_STATUS)"
+echo "  plugin dir      $GDAY_ETC/status.d  (examples only — inert until activated)"
+echo "  cache dir       $GDAY_VAR"
+echo "  systemd timers  gday-static.timer    (boot+${GDAY_STATIC_ONBOOTSEC}, then ${GDAY_STATIC_ONCALENDAR})"
+echo "                  gday-updates.timer   (${GDAY_UPDATES_ONCALENDAR})"
+echo "                  gday-refresh.timer   (every ${GDAY_REFRESH_INTERVAL})"
+if [[ -d /etc/update-motd.d ]]; then
+  echo "  update-motd.d   ${motd_d_count} script(s) currently neutralised (execute bit dropped, not deleted)"
+else
+  echo "  update-motd.d   n/a — not present on this system"
+fi
+echo
+echo "  Preview now:     gday"
+echo "  Change cadence:  edit $GDAY_CONF, then re-run this script"
+echo "  Uninstall:       sudo ./uninstall.sh          (keeps config + caches)"
+echo "                   sudo ./uninstall.sh --purge  (removes everything, config + caches too)"
+echo "════════════════════════════════════════════════════════════════════"
