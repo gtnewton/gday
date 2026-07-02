@@ -74,10 +74,7 @@ sudo ./install.sh
 
 Re-running is safe (idempotent). On Debian/Ubuntu, install.sh neutralises the
 stock `/etc/update-motd.d/` scripts (drops the execute bit; does not delete
-them) so they don't duplicate or override the g'day banner. It finishes with
-a summary of exactly what was installed (paths, timer cadences, config
-status) and what else you can do next — install/uninstall are run rarely
-enough to be worth spelling out each time rather than relying on memory.
+them) so they don't duplicate or override the g'day banner.
 
 ## Uninstall
 
@@ -89,12 +86,6 @@ sudo ./uninstall.sh --purge   # also removes /etc/gday and /var/lib/gday
 Uninstall restores the execute bit on any `update-motd.d` scripts that were
 neutralised during install, and restores whatever `/etc/motd` contained before
 install.sh first overwrote it (if anything) instead of leaving it blank.
-
-It then re-checks the filesystem and systemd state (not just prints what it
-*meant* to do) and reports pass/fail per item, so "nothing of gday is left"
-is a checked fact rather than an assumption. If you didn't pass `--purge`, it
-ends with an explicit reminder — config and caches were left in place on
-purpose, with the exact command to remove those too.
 
 ## Configuration
 
