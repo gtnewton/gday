@@ -52,6 +52,49 @@ os::uptime() {
   [[ -n $boot ]] && render::row 'Booted' "$boot"
 }
 
+# os::last_login — most recent login on this machine, system-wide (§3: never
+# personalized to the viewer — that's sshd's PrintLastLog's job, done
+# correctly per-session at the actual moment of login; this is a global fact
+# like everything else in this section, and always names the account so it
+# can't read as "your" login).
+#
+# `last -w --time-format iso`: -w avoids truncating long host/IPv6 columns
+# (default width appends a bare `*` instead, e.g. `fe80::bd3e:ab12*`);
+# --time-format iso turns the timestamp into one space-free token instead of
+# `Thu Jul  2 11:21` (several tokens), which is what makes the host column
+# (empty for local/console logins, otherwise variable-width) unambiguous to
+# split on — this is why we don't just parse `last`'s default columns.
+os::last_login() {
+  local out parsed user host ts val date_part
+  out=$(gday::probe last last -n 5 -w --time-format iso)
+  [[ -n $out ]] || return 0
+  # Fields joined with `|`, not a tab: bash `read` always treats tab as IFS
+  # *whitespace* regardless of what IFS is set to, collapsing consecutive
+  # tabs and silently dropping the empty host field for local/console
+  # logins. `|` isn't whitespace, so an empty middle field survives.
+  parsed=$(awk '
+    /^reboot / || /^shutdown / || /^wtmp begins/ || NF==0 { next }
+    {
+      user = $1; host = ""; ts = ""
+      for (i = 3; i <= NF; i++) {
+        if ($i ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T/) { ts = $i; break }
+        host = (host == "" ? $i : host " " $i)
+      }
+      if (ts != "") { printf "%s|%s|%s\n", user, host, ts; exit }
+    }
+  ' <<< "$out")
+  [[ -n $parsed ]] || return 0
+  IFS='|' read -r user host ts <<< "$parsed"
+  [[ -n $user && -n $ts ]] || return 0
+  date_part=$(date -d "$ts" '+%Y-%m-%d %H:%M' 2>/dev/null) || return 0
+  if [[ -n $host ]]; then
+    val="${user} from ${host} · ${date_part}"
+  else
+    val="${user} · ${date_part}"
+  fi
+  render::row 'Last login' "$val"
+}
+
 # gday::os_section — assemble the OPERATING SYSTEM section.
 gday::os_section() {
   render::header '🐧' 'OPERATING SYSTEM'
@@ -59,4 +102,5 @@ gday::os_section() {
   os::kernel
   os::desktop
   os::uptime
+  os::last_login
 }

@@ -149,6 +149,18 @@ for fdir in "${fixture_dirs[@]}"; do
     [[ -n $kern ]] && run_section "os/kernel" "$fdir" -- "$kern"
   fi
   run_section "os/uptime-row" "$fdir" -- "Uptime"
+  if [[ -r $fdir/last ]]; then
+    run_section "os/last-login-row" "$fdir" -- "Last login"
+  else
+    # Degraded fixture set has no `last` data — OS section must still render
+    # fine without the row (§5: omit, don't error).
+    out_os=$(env GDAY_FIXTURE_DIR="$fdir" GDAY_VAR="$tmpdir" "$gday" --section os 2>/dev/null) || true
+    if grep -qF 'OPERATING SYSTEM' <<< "$out_os" && ! grep -qF 'Last login' <<< "$out_os"; then
+      ok "os/last-login-omitted-without-fixture"
+    else
+      fail "os/last-login-omitted-without-fixture"
+    fi
+  fi
 
   # ── Status ───────────────────────────────────────────────────────────────
   section=status

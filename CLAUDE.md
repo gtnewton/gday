@@ -47,9 +47,18 @@ Settled. Do not relitigate during the build.
 - **Disk usage, uptime, and load are as-of-last-refresh**, not the login
   instant. The footer carries a generation timestamp so the staleness is
   visible and honest.
-- **No per-user data in `/etc/motd`.** It is one global file, so "last login"
-  is **not** part of g'day output — sshd's `PrintLastLog` already prints it
-  per-user. MUST NOT reintroduce it.
+- **No personalized, per-viewer data in `/etc/motd`.** It is one global file
+  regenerated on a timer with no way to know who's about to log in next, so
+  g'day MUST NOT claim to show *your* last login the way sshd's
+  `PrintLastLog` correctly does per-session at the actual moment of login —
+  that would mean showing one stale, five-minutes-old snapshot to whoever
+  happens to log in, potentially describing the wrong person's session
+  entirely. This does **not** prohibit an honestly-global fact about the
+  *system* (e.g. "most recent login on this machine, and who" —
+  `os::last_login` in `lib/os.sh`, always naming the account so it can't
+  read as "yours"); it
+  only prohibits pretending a static, shared file is personalized to the
+  reader. See §11 (OS section) for the exact rule this row follows.
 - **Debian/Ubuntu install MUST neutralise `update-motd.d`.** pam_motd there
   prefers `/run/motd.dynamic` built from `/etc/update-motd.d/`, which would
   override or duplicate our `/etc/motd`. The installer disables the stock
@@ -219,6 +228,11 @@ specified; the `df` invocation is the implementation's choice.)*
 Distro `PRETTY_NAME` + rolling/version, arch; kernel `uname -r`; Desktop line
 from §10; uptime from `/proc/uptime` as `Nd HH:MM`; boot time derived from it.
 *(Date/time formatting is the implementation's choice, subject to §4.)*
+
+Last login: most recent login on the machine, system-wide — from `last`,
+never personalized to the viewer (§3). Always names the account
+(`<user> from <host> · <date> <time>`, or `<user> · <date> <time>` for a
+local/console login with no host) so it cannot read as "your" login.
 
 ### Status (`lib/status.sh`, assemble)
 Core glyph-flagged lines:
