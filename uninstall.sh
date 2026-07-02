@@ -29,10 +29,19 @@ RESTORED_MOTD_D=()
 MOTD_OUTCOME='not present'
 
 # ── Stop and disable timers ───────────────────────────────────────────────────
-for unit in gday-static.timer gday-updates.timer gday-refresh.timer \
-            gday-static.service gday-updates.service gday-refresh.service; do
+# Only the *.timer units have an [Install] section (WantedBy=timers.target) —
+# the *.service units are only ever triggered by their matching timer and were
+# never meant to be enabled directly (correct, standard systemd design, not a
+# packaging gap). Running `is-enabled`/`disable` against them anyway makes
+# systemd report them as "static" (still exit 0) and then print its "unit
+# files have no installation config" warning on the pointless disable — so
+# services only get stopped (in case one's mid-run), never disabled.
+for unit in gday-static.timer gday-updates.timer gday-refresh.timer; do
   systemctl is-active --quiet "$unit" 2>/dev/null && systemctl stop "$unit" || true
   systemctl is-enabled --quiet "$unit" 2>/dev/null && systemctl disable "$unit" || true
+done
+for unit in gday-static.service gday-updates.service gday-refresh.service; do
+  systemctl is-active --quiet "$unit" 2>/dev/null && systemctl stop "$unit" || true
 done
 
 # ── Remove systemd units + drop-ins ──────────────────────────────────────────
