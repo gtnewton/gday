@@ -42,7 +42,19 @@ status::services() {
     local line name first=''
     while IFS= read -r line; do
       [[ -n $line ]] || continue
-      name=${line%%[[:space:]]*}
+      # `systemctl --failed` prefixes each row with a state glyph (●) before
+      # the unit name on modern systemd, so the naive "first whitespace-
+      # delimited token" grabs the glyph, not the name. Unit types are a
+      # fixed, closed set, so scan for the first field ending in a known
+      # suffix — works whether or not the glyph column is present.
+      name=$(awk '{
+        for (i = 1; i <= NF; i++) {
+          if ($i ~ /\.(service|socket|target|mount|automount|swap|timer|path|slice|scope|device)$/) {
+            print $i; exit
+          }
+        }
+      }' <<< "$line")
+      [[ -n $name ]] || name=${line%%[[:space:]]*}   # best-effort fallback
       [[ -z $first ]] && first=$name
       render::cont "$name"
     done <<< "$out"
