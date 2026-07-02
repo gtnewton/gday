@@ -59,8 +59,11 @@ updates::reboot_required() {
 
 # gday::build_updates — write updates.txt for the updates tier.
 gday::build_updates() {
-  gday::detect
-  mkdir -p "$GDAY_VAR"
+  # gday::detect/mkdir isolated via gday::_emit (§5) — same reasoning as
+  # gday::build_static: a bare failure here would abort this whole function
+  # under `set -e` before ever attempting the updates probe below.
+  gday::_emit gday::detect
+  gday::_emit mkdir -p "$GDAY_VAR"
   local count reboot tmp
   count=$(updates::count 2>/dev/null) || count=''
   count=${count//[![:digit:]]/}

@@ -70,13 +70,22 @@ gday::_write_cache() {
 }
 
 gday::build_static() {
-  gday::detect
-  mkdir -p "$GDAY_VAR"
-  gday::packages_build              # writes pkgs.txt (full list)
-  hw::smart_build                   # writes smart.txt (root-only; degrades silently)
-  gday::_write_cache banner   gday::banner_section
-  gday::_write_cache hardware gday::hardware_section
-  gday::_write_cache packages gday::packages_section
+  # Every step isolated via gday::_emit (§5): under `set -e`, a single bare
+  # failure here (e.g. gday::packages_build's own `mktemp ... || return 1`)
+  # would otherwise abort the whole function before the *other* caches ever
+  # got written — the exact same section-isolation gap gday::assemble already
+  # guards against on the read path, just never applied to the build path.
+  # A silent build failure is worse than a render glitch: nothing refreshes
+  # the stale cache again until the next tier fire (or forever, if install.sh
+  # or the timer swallows the exit code — which they do, per §5's "tolerate
+  # partial populate").
+  gday::_emit gday::detect
+  gday::_emit mkdir -p "$GDAY_VAR"
+  gday::_emit gday::packages_build              # writes pkgs.txt (full list)
+  gday::_emit hw::smart_build                   # writes smart.txt (root-only; degrades silently)
+  gday::_emit gday::_write_cache banner   gday::banner_section
+  gday::_emit gday::_write_cache hardware gday::hardware_section
+  gday::_emit gday::_write_cache packages gday::packages_section
 }
 
 # --- assemble ---------------------------------------------------------------

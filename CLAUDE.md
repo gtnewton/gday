@@ -78,6 +78,17 @@ emergent property of scattered guards.
   command, failed subprocess, permission denial, malformed output, or plugin
   fault **MUST** affect only its own section's output.
 - Assembly **MUST** continue and emit the sections that did succeed.
+- **This isolation applies to the static/updates tier *builds*, not just the
+  assemble/read path.** A failure in one static-tier step (e.g.
+  `gday::packages_build`) MUST NOT prevent the *other* caches
+  (banner/hardware/etc.) from being (re)written — every step in
+  `gday::build_static`/`gday::build_updates` MUST go through `gday::_emit` (or
+  equivalent), exactly like `gday::assemble` already does for its sections.
+  Concretely worse than a one-off render glitch: a silently-aborted build
+  leaves the *cache* stale indefinitely (nothing else refreshes it until the
+  next tier fire, if ever), and both `install.sh` and the systemd services
+  tolerate a non-zero exit here without surfacing it — this was a real,
+  observed bug (fixed 2026-07-02), not a hypothetical.
 - Within a section, a failed row **SHOULD** be omitted rather than shown empty
   or with an error string.
 - g'day **MUST** exit non-zero only when the *requested operation itself*
