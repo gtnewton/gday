@@ -5,14 +5,14 @@ static `/etc/motd`; pam_motd displays it at every login (SSH and console) with
 no per-login work and no shell-specific hooks.
 
 ```
-      _              _       _
-  ___| | ___   _ ___| | __ _| |__
- / __| |/ / | | / __| |/ _` | '_ \
- \__ \   <| |_| \__ \ | (_| | |_) |
- |___/_|\_\\__, |___/_|\__,_|_.__/
-           |___/
+                            _              _       _
+                        ___| | ___   _ ___| | __ _| |__
+                       / __| |/ / | | / __| |/ _` | '_ \
+                       \__ \   <| |_| \__ \ | (_| | |_) |
+                       |___/_|\_\\__, |___/_|\__,_|_.__/
+                                 |___/
 
-         skylab · Ubuntu 24.04.1 LTS · GNOME 46.2 · wayland
+               skylab · Ubuntu 24.04.1 LTS · GNOME 46.2 · wayland
 
  💻  HARDWARE ──────────────────────────────────────────────────────────────────
    System       Acme Systems Workstation Pro (rev 1.0)
