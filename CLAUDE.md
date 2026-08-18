@@ -416,3 +416,12 @@ and a degradation test with optional commands forced absent.
 - ANSI colour in addition to emoji, or emoji only? (Config-gated either way.)
 - Logged-in user count (as-of-refresh) as a core STATUS line, or a plugin?
 - Merge snap/flatpak/pipx/cargo when detected, or strictly PM-only for v1?
+
+## Project state
+
+This project maintains `STATE.md` at the root. Read it at the start of any
+substantive session. Before finishing a session in which you changed code, made
+a plan, or learned something that changes what comes next, update `STATE.md`:
+revise `next`, `blocked_on`, and `updated`, and prepend a dated `##` entry
+describing what changed and what is now outstanding. Keep entries newest-first.
+Do not commit `STATE.md` unless asked.
