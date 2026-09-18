@@ -6,6 +6,12 @@ set -euo pipefail
 
 readonly GDAY_VERSION='0.1.0-dev'
 
+# Total assembled-output length budget (§9): a soft warning, not enforcement —
+# g'day never truncates a real section to fit. Assemble warns to stderr once
+# per run when exceeded; a login banner long enough to scroll tends to get
+# `chmod -x`'d by its own users.
+readonly GDAY_LENGTH_BUDGET=45
+
 # --- path resolution: dev tree first, installed layout second ---------------
 gday::_resolve_lib() {
   local self src dir
@@ -31,27 +37,42 @@ GDAY_MOTD=${GDAY_MOTD:-/etc/motd}
 # set there take effect. An invalid value warns and falls back; never aborts.
 gday::_load_conf() {
   local conf=${GDAY_CONF:-/etc/gday/gday.conf}
-  [[ -r $conf ]] || return 0
-  # shellcheck source=/dev/null
-  source "$conf" 2>/dev/null || {
-    printf 'gday: warning: could not source %s\n' "$conf" >&2
-    return 0
-  }
-  # Validate integer fields; reset to default (unset) on bad value.
+  if [[ -r $conf ]]; then
+    # shellcheck source=/dev/null
+    source "$conf" 2>/dev/null || printf 'gday: warning: could not source %s\n' "$conf" >&2
+  fi
+  # Validate integer fields; reset to default (unset) on bad value. Runs
+  # regardless of whether a conf file was found, so a value pre-set in the
+  # environment (e.g. by tests) gets the same validation as one from the file.
   local v val
-  for v in GDAY_BAR_WIDTH GDAY_PKG_INLINE_N; do
+  for v in GDAY_BAR_WIDTH GDAY_PKG_INLINE_N GDAY_ALERTS_MAX_ROWS; do
     val=${!v:-}
     if [[ -n $val && ! $val =~ ^[0-9]+$ ]]; then
       printf 'gday: warning: invalid %s=%q in %s; using default\n' "$v" "$val" "$conf" >&2
       unset "$v"
     fi
   done
+  # GDAY_ALERTS_DIR is an externally supplied path (§17) and MUST be
+  # validated before use: it must be absolute. Existence is checked at read
+  # time by lib/alerts.sh — an absent directory is a normal, silent state
+  # (planning/alerts-section.md §4.6), not a config error.
+  if [[ -n ${GDAY_ALERTS_DIR:-} && ${GDAY_ALERTS_DIR:0:1} != / ]]; then
+    printf 'gday: warning: invalid GDAY_ALERTS_DIR=%q in %s (not absolute); using default\n' \
+      "$GDAY_ALERTS_DIR" "$conf" >&2
+    unset GDAY_ALERTS_DIR
+  fi
 }
 gday::_load_conf
 
-for _lib in render detect hardware banner os disk status packages updates; do
-  # shellcheck source=/dev/null
-  source "$GDAY_LIB/${_lib}.sh"
+for _lib in render detect hardware network banner os disk status alerts packages updates; do
+  if [[ -r "$GDAY_LIB/${_lib}.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "$GDAY_LIB/${_lib}.sh"
+  else
+    # §4.4/§5: a single missing lib file must degrade, not kill the whole CLI
+    # under set -e. Its section is simply unavailable for this run.
+    printf 'gday: warning: missing lib %s.sh; its section will be unavailable\n' "$_lib" >&2
+  fi
 done
 unset _lib
 
@@ -117,16 +138,31 @@ gday::assemble() {
   gday::detect
   # GDAY_SECTIONS: space-separated list of enabled sections (§13). Fixed
   # render order is always preserved (§9); this only controls which appear.
-  local sections=${GDAY_SECTIONS:-banner hardware disk os status packages}
+  local sections=${GDAY_SECTIONS:-banner hardware network disk os status packages}
   gday::_sec_on() { case " $sections " in *" $1 "*) return 0 ;; esac; return 1; }
 
-  gday::_sec_on banner   && { gday::_cached banner   gday::banner_section   ; printf '\n'; }
-  gday::_sec_on hardware && { gday::_cached hardware gday::hardware_section ; printf '\n'; }
-  gday::_sec_on disk     && { gday::_emit gday::disk_section                ; printf '\n'; }
-  gday::_sec_on os       && { gday::_emit gday::os_section                  ; printf '\n'; }
-  gday::_sec_on status   && { gday::_emit gday::status_section              ; printf '\n'; }
-  gday::_sec_on packages && { gday::_cached packages gday::packages_section ; printf '\n'; }
-  gday::footer
+  local body
+  body=$(
+    gday::_sec_on banner   && { gday::_cached banner   gday::banner_section   ; printf '\n'; }
+    gday::_sec_on hardware && { gday::_cached hardware gday::hardware_section ; printf '\n'; }
+    gday::_sec_on network  && { gday::_emit gday::network_section            ; printf '\n'; }
+    gday::_sec_on disk     && { gday::_emit gday::disk_section                ; printf '\n'; }
+    gday::_sec_on os       && { gday::_emit gday::os_section                  ; printf '\n'; }
+    gday::_sec_on status   && { gday::_emit gday::status_section              ; printf '\n'; }
+    gday::_sec_on packages && { gday::_cached packages gday::packages_section ; printf '\n'; }
+    gday::footer
+  )
+
+  # §9 length budget: a soft, non-blocking warning (§5 — never abort on a
+  # cosmetic threshold, only on a failed requested operation).
+  local lines
+  lines=$(wc -l <<< "$body")
+  if (( lines > GDAY_LENGTH_BUDGET )); then
+    printf 'gday: warning: assembled output is %d lines (budget %d); consider trimming GDAY_SECTIONS\n' \
+      "$lines" "$GDAY_LENGTH_BUDGET" >&2
+  fi
+
+  printf '%s\n' "$body"
 }
 
 # --- single-section debug affordance (§19) ----------------------------------
@@ -136,6 +172,7 @@ gday::one_section() {
   case $name in
     banner)   gday::_emit gday::banner_section ;;
     hardware) gday::_emit gday::hardware_section ;;
+    network)  gday::_emit gday::network_section ;;
     disk)     gday::_emit gday::disk_section ;;
     os)       gday::_emit gday::os_section ;;
     status)   gday::_emit gday::status_section ;;
@@ -165,7 +202,7 @@ usage: gday [options]
   --static             rebuild the static tier caches now
   --updates            rebuild the updates tier cache now
   --write-motd         assemble from caches and write /etc/motd (used by gday-refresh.service)
-  --section <name>     emit one section (banner|hardware|disk|os|status|packages)
+  --section <name>     emit one section (banner|hardware|network|disk|os|status|packages)
   --version            print version
   -h, --help           this help
 EOF

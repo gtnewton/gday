@@ -88,6 +88,15 @@ mkdir -p "$GDAY_VAR"
 chown root:root "$GDAY_VAR"
 chmod 0755 "$GDAY_VAR"
 
+# ── Alerts drop-in directory (planning/alerts-section.md §4.1) ───────────────
+# Producer-written, not gday-written — created here (explicit ownership/mode,
+# not umask-dependent, §17/§20) so a producer can drop a file in with correct
+# permissions from the first run, without reimplementing this itself.
+say "creating alerts drop-in dir → $GDAY_VAR/alerts.d"
+mkdir -p "$GDAY_VAR/alerts.d"
+chown root:root "$GDAY_VAR/alerts.d"
+chmod 0755 "$GDAY_VAR/alerts.d"
+
 # ── Debian/Ubuntu: neutralise update-motd.d ──────────────────────────────────
 # pam_motd on Debian/Ubuntu prefers /run/motd.dynamic built from
 # /etc/update-motd.d/ scripts, which would override or duplicate our /etc/motd.

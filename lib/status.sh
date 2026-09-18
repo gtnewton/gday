@@ -129,5 +129,6 @@ gday::status_section() {
   status::reboot
   status::services
   status::disks
+  status::alerts
   status::plugins
 }

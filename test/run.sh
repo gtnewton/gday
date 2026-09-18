@@ -125,8 +125,30 @@ for fdir in "${fixture_dirs[@]}"; do
   if [[ -r $fdir/dmidecode-system ]]; then
     run_section "hardware/system-row" "$fdir" -- "System"
   fi
+  if [[ -r $fdir/dmidecode-bios ]]; then
+    run_section "hardware/bios-row" "$fdir" -- "BIOS"
+  fi
   if [[ -r $fdir/lsblk ]]; then
     run_section "hardware/storage-row" "$fdir" -- "Storage"
+  fi
+
+  # ── Network ──────────────────────────────────────────────────────────────
+  section=network
+  if [[ -r $fdir/ip-route ]]; then
+    run_section "network/header" "$fdir" -- "NETWORK"
+    run_section "network/interface-row" "$fdir" -- "Interface"
+    if [[ -r $fdir/ip-addr-eth0 ]]; then
+      run_section "network/ipv4-row" "$fdir" -- "IPv4"
+    fi
+  else
+    # No default-route fixture ⇒ the whole section must be omitted, not just
+    # degraded (CLAUDE.md §11/§15: "do not guess").
+    out_net=$(env GDAY_FIXTURE_DIR="$fdir" GDAY_VAR="$tmpdir" "$gday" --section network 2>/dev/null) || true
+    if [[ -z $out_net ]]; then
+      ok "network/omitted-without-default-route"
+    else
+      fail "network/omitted-without-default-route: expected empty output, got: $out_net"
+    fi
   fi
 
   # ── Disk usage ───────────────────────────────────────────────────────────
@@ -213,6 +235,290 @@ for fdir in "${fixture_dirs[@]}"; do
   fi
 
 done
+
+# ── Network degradation: speed unreadable (-1, wireless/virtual convention) ──
+hdr "network (speed unreadable)"
+net_sparse=$(mktemp -d)
+cp "$here/test/fixtures/ip-route"              "$net_sparse/"
+cp "$here/test/fixtures/ip-addr-eth0"          "$net_sparse/"
+cp "$here/test/fixtures/sys-net-eth0-operstate" "$net_sparse/"
+cp "$here/test/fixtures/sys-net-eth0-address"   "$net_sparse/"
+printf -- '-1\n' > "$net_sparse/sys-net-eth0-speed"   # no sys-net-eth0-duplex either
+net_var=$(mktemp -d)
+out_net_deg=$(env GDAY_FIXTURE_DIR="$net_sparse" GDAY_VAR="$net_var" "$gday" --section network 2>/dev/null) || true
+rm -rf "$net_sparse" "$net_var"
+if grep -qF 'Interface' <<< "$out_net_deg" && ! grep -qF 'Speed/Duplex' <<< "$out_net_deg"; then
+  ok "network/speed-omitted-on-negative-one"
+else
+  fail "network/speed-omitted-on-negative-one"
+  printf '    output: %s\n' "$out_net_deg"
+fi
+
+# ── Banner override: GDAY_BANNER_FILE (§4.1 of the development guide) ────────
+hdr "banner override (GDAY_BANNER_FILE)"
+banner_var=$(mktemp -d)
+
+# Plain override: content replaces figlet art verbatim.
+banner_plain=$(mktemp)
+printf 'HCMC LAB\nDEPT OF COMPUTING\n' > "$banner_plain"
+out_banner=$(env GDAY_FIXTURE_DIR="$here/test/fixtures" GDAY_VAR="$banner_var" \
+  GDAY_BANNER_FILE="$banner_plain" "$gday" --section banner 2>/dev/null) || true
+if grep -qF 'HCMC LAB' <<< "$out_banner" && grep -qF 'DEPT OF COMPUTING' <<< "$out_banner"; then
+  ok "banner-override/content-used-verbatim"
+else
+  fail "banner-override/content-used-verbatim"
+fi
+
+# GDAY_BANNER_SUBTITLE=0 suppresses the computed subtitle.
+out_banner_nosub=$(env GDAY_FIXTURE_DIR="$here/test/fixtures" GDAY_VAR="$banner_var" \
+  GDAY_BANNER_FILE="$banner_plain" GDAY_BANNER_SUBTITLE=0 "$gday" --section banner 2>/dev/null) || true
+if ! grep -qF 'skylab' <<< "$out_banner_nosub"; then
+  ok "banner-override/subtitle-suppressed"
+else
+  fail "banner-override/subtitle-suppressed"
+fi
+rm -f "$banner_plain"
+
+# A line wider than 80 columns is truncated, with a warning, not left to
+# break the §9 width invariant.
+banner_wide=$(mktemp)
+printf 'X%.0s' $(seq 1 120) > "$banner_wide"
+printf '\n' >> "$banner_wide"
+out_banner_wide=$(env GDAY_FIXTURE_DIR="$here/test/fixtures" GDAY_VAR="$banner_var" \
+  GDAY_BANNER_FILE="$banner_wide" "$gday" --section banner 2>/dev/null) || true
+err_banner_wide=$(env GDAY_FIXTURE_DIR="$here/test/fixtures" GDAY_VAR="$banner_var" \
+  GDAY_BANNER_FILE="$banner_wide" "$gday" --section banner 2>&1 >/dev/null) || true
+max_len=$(awk '{ print length }' <<< "$out_banner_wide" | sort -n | tail -1)
+if [[ ${max_len:-0} -le 80 ]] && grep -qF 'truncated' <<< "$err_banner_wide"; then
+  ok "banner-override/wide-line-truncated"
+else
+  fail "banner-override/wide-line-truncated: max_len=${max_len:-?} stderr=${err_banner_wide}"
+fi
+rm -f "$banner_wide"
+
+# Tabs are expanded before sanitizing, not deleted (render::sanitize strips
+# 0x09 — an un-expanded tab would silently drop everything after it).
+banner_tabs=$(mktemp)
+printf 'A\tMARKER\n' > "$banner_tabs"
+out_banner_tabs=$(env GDAY_FIXTURE_DIR="$here/test/fixtures" GDAY_VAR="$banner_var" \
+  GDAY_BANNER_FILE="$banner_tabs" "$gday" --section banner 2>/dev/null) || true
+if grep -qF 'MARKER' <<< "$out_banner_tabs"; then
+  ok "banner-override/tabs-expanded-not-dropped"
+else
+  fail "banner-override/tabs-expanded-not-dropped"
+fi
+rm -f "$banner_tabs"
+
+# More than 20 lines is capped, with a warning.
+banner_long=$(mktemp)
+for i in $(seq 1 30); do printf 'line%d\n' "$i"; done > "$banner_long"
+out_banner_long=$(env GDAY_FIXTURE_DIR="$here/test/fixtures" GDAY_VAR="$banner_var" \
+  GDAY_BANNER_FILE="$banner_long" "$gday" --section banner 2>/dev/null) || true
+err_banner_long=$(env GDAY_FIXTURE_DIR="$here/test/fixtures" GDAY_VAR="$banner_var" \
+  GDAY_BANNER_FILE="$banner_long" "$gday" --section banner 2>&1 >/dev/null) || true
+line_count=$(grep -c '^line' <<< "$out_banner_long")
+if [[ $line_count -eq 20 ]] && grep -qF 'capped' <<< "$err_banner_long"; then
+  ok "banner-override/line-count-capped"
+else
+  fail "banner-override/line-count-capped: got $line_count lines, stderr=${err_banner_long}"
+fi
+rm -f "$banner_long"
+rm -rf "$banner_var"
+
+# ── Alerts (Phase 1.5, planning/alerts-section.md §4.6) ──────────────────────
+hdr "alerts"
+
+alerts_empty_fixtures=$(mktemp -d)   # empty GDAY_FIXTURE_DIR: sandboxes the
+                                      # rest of STATUS (updates/reboot/
+                                      # services/disks) so only alerts output
+                                      # is under test.
+
+# alerts_run <alerts_dir> [extra_env...] — run `gday --section status`
+# against <alerts_dir>, capturing stdout and stderr separately.
+alerts_run_out=''
+alerts_run_err=''
+alerts_run() {
+  local adir=$1; shift
+  local avar errfile
+  avar=$(mktemp -d)
+  errfile=$(mktemp)
+  alerts_run_out=$(env GDAY_FIXTURE_DIR="$alerts_empty_fixtures" GDAY_VAR="$avar" \
+    GDAY_ALERTS_DIR="$adir" "$@" "$gday" --section status 2>"$errfile") || true
+  alerts_run_err=$(cat "$errfile" 2>/dev/null || true)
+  rm -f "$errfile"
+  rm -rf "$avar"
+}
+
+# 1. One producer file: one FAIL, one WARN, one docref-less row.
+a1=$(mktemp -d); chmod 755 "$a1"
+now_iso=$(date -Iseconds)
+{
+  printf '# gday-alerts v1\n@ source=demo-check\n@ generated=%s\n@ expires=26h\n' "$now_iso"
+  printf 'FAIL\tunattended-upgrades\tu-u has never run on this box\tGUAVA-RUNBOOK.md#unattended-upgrades\n'
+  printf 'WARN\tnetbootbuild\tjob not scheduled on this box\tGUAVA-RUNBOOK.md#netbootbuild\n'
+  printf 'WARN\tnodocref\tno doc for this one\n'
+} > "$a1/demo-check.alerts"
+chmod 644 "$a1/demo-check.alerts"
+alerts_run "$a1"
+if grep -qF 'unattended-upgrades: u-u has never run on this box' <<< "$alerts_run_out" \
+   && grep -qF 'GUAVA-RUNBOOK.md#unattended-upgrades' <<< "$alerts_run_out" \
+   && grep -qF 'netbootbuild: job not scheduled on this box' <<< "$alerts_run_out" \
+   && grep -qF 'nodocref: no doc for this one' <<< "$alerts_run_out"; then
+  ok "alerts/basic-fail-warn-nodocref"
+else
+  fail "alerts/basic-fail-warn-nodocref"
+  printf '    output: %s\n' "$alerts_run_out"
+fi
+# FAIL rows must render before WARN rows regardless of file order.
+fail_line=$(grep -n 'unattended-upgrades' <<< "$alerts_run_out" | head -1 | cut -d: -f1)
+warn_line=$(grep -n 'netbootbuild' <<< "$alerts_run_out" | head -1 | cut -d: -f1)
+if [[ -n $fail_line && -n $warn_line && $fail_line -lt $warn_line ]]; then
+  ok "alerts/fail-before-warn-ordering"
+else
+  fail "alerts/fail-before-warn-ordering"
+fi
+rm -rf "$a1"
+
+# 2. Malformed row (too few fields; unknown severity) dropped, others render.
+a2=$(mktemp -d); chmod 755 "$a2"
+{
+  printf '# gday-alerts v1\n@ source=demo2\n@ generated=%s\n' "$now_iso"
+  printf 'FAIL\ttoofewfields\n'
+  printf 'BADSEV\tlabel\tmessage\n'
+  printf 'WARN\tgoodone\tthis one is fine\n'
+} > "$a2/demo2.alerts"
+chmod 644 "$a2/demo2.alerts"
+alerts_run "$a2"
+if grep -qF 'goodone: this one is fine' <<< "$alerts_run_out" \
+   && ! grep -qF 'toofewfields' <<< "$alerts_run_out" \
+   && ! grep -qF 'BADSEV' <<< "$alerts_run_out"; then
+  ok "alerts/malformed-row-dropped-others-render"
+else
+  fail "alerts/malformed-row-dropped-others-render"
+  printf '    output: %s\n' "$alerts_run_out"
+fi
+rm -rf "$a2"
+
+# 3. Expired file ⇒ staleness line, records suppressed.
+a3=$(mktemp -d); chmod 755 "$a3"
+{
+  printf '# gday-alerts v1\n@ source=demo3\n@ generated=2020-01-01T00:00:00-07:00\n'
+  printf 'FAIL\tshouldnotshow\tstale record\n'
+} > "$a3/demo3.alerts"
+chmod 644 "$a3/demo3.alerts"
+alerts_run "$a3"
+if grep -qF 'demo3: no report since' <<< "$alerts_run_out" \
+   && ! grep -qF 'shouldnotshow' <<< "$alerts_run_out"; then
+  ok "alerts/expired-file-staleness-line-records-suppressed"
+else
+  fail "alerts/expired-file-staleness-line-records-suppressed"
+  printf '    output: %s\n' "$alerts_run_out"
+fi
+rm -rf "$a3"
+
+# 4. Declared-but-missing producer ⇒ warning line.
+a4=$(mktemp -d); chmod 755 "$a4"   # empty: no .alerts file at all
+alerts_run "$a4" GDAY_ALERTS_EXPECT=guava-morning-check
+if grep -qF 'guava-morning-check: no report file' <<< "$alerts_run_out"; then
+  ok "alerts/declared-missing-producer-warns"
+else
+  fail "alerts/declared-missing-producer-warns"
+  printf '    output: %s\n' "$alerts_run_out"
+fi
+rm -rf "$a4"
+
+# 5. Group-writable file, producer NOT declared ⇒ skipped silently.
+a5=$(mktemp -d); chmod 755 "$a5"
+printf '# gday-alerts v1\n@ source=undeclared-check\n@ generated=%s\nFAIL\tx\ty\n' "$now_iso" \
+  > "$a5/undeclared-check.alerts"
+chmod 664 "$a5/undeclared-check.alerts"
+alerts_run "$a5"
+if ! grep -qF 'undeclared-check' <<< "$alerts_run_out"; then
+  ok "alerts/group-writable-undeclared-silent"
+else
+  fail "alerts/group-writable-undeclared-silent"
+  printf '    output: %s\n' "$alerts_run_out"
+fi
+rm -rf "$a5"
+
+# 6. Group-writable file, producer DECLARED ⇒ "report file unusable" line,
+# records suppressed, reason on stderr — never in the banner (§4.3's split;
+# a test that only covers case 5 would let the regression back in).
+a6=$(mktemp -d); chmod 755 "$a6"
+printf '# gday-alerts v1\n@ source=guava-morning-check\n@ generated=%s\nFAIL\tx\ty\n' "$now_iso" \
+  > "$a6/guava-morning-check.alerts"
+chmod 664 "$a6/guava-morning-check.alerts"
+alerts_run "$a6" GDAY_ALERTS_EXPECT=guava-morning-check
+if grep -qF 'guava-morning-check: report file unusable' <<< "$alerts_run_out" \
+   && ! grep -qF 'FAIL' <<< "$alerts_run_out" \
+   && ! grep -q 'mode\|owner\|permission' <<< "$alerts_run_out" \
+   && grep -qi 'rejected' <<< "$alerts_run_err"; then
+  ok "alerts/group-writable-declared-unusable-line-reason-on-stderr"
+else
+  fail "alerts/group-writable-declared-unusable-line-reason-on-stderr"
+  printf '    stdout: %s\n    stderr: %s\n' "$alerts_run_out" "$alerts_run_err"
+fi
+rm -rf "$a6"
+
+# 7. ANSI escape in a message ⇒ stripped by render::sanitize.
+a7=$(mktemp -d); chmod 755 "$a7"
+esc=$'\x1b'
+printf '# gday-alerts v1\n@ source=demo7\n@ generated=%s\nFAIL\tcolour\thas %s[31mred%s[0mtext\n' \
+  "$now_iso" "$esc" "$esc" > "$a7/demo7.alerts"
+chmod 644 "$a7/demo7.alerts"
+alerts_run "$a7"
+if ! grep -qP '\x1b' <<< "$alerts_run_out" 2>/dev/null; then
+  ok "alerts/ansi-escape-stripped"
+else
+  fail "alerts/ansi-escape-stripped"
+fi
+rm -rf "$a7"
+
+# 8. Row cap exceeded ⇒ truncation line.
+a8=$(mktemp -d); chmod 755 "$a8"
+{
+  printf '# gday-alerts v1\n@ source=demo8\n@ generated=%s\n' "$now_iso"
+  for i in $(seq 1 10); do printf 'FAIL\tcheck%d\tmessage %d\n' "$i" "$i"; done
+} > "$a8/demo8.alerts"
+chmod 644 "$a8/demo8.alerts"
+alerts_run "$a8"
+if grep -qF 'and 2 more' <<< "$alerts_run_out" && grep -qF 'check8' <<< "$alerts_run_out" \
+   && ! grep -qF 'check9' <<< "$alerts_run_out"; then
+  ok "alerts/row-cap-truncation-line"
+else
+  fail "alerts/row-cap-truncation-line"
+  printf '    output: %s\n' "$alerts_run_out"
+fi
+rm -rf "$a8"
+
+# 9. Empty and absent alerts.d ⇒ section renders, no alert output, exit 0.
+# Checked via the FAIL/WARN glyphs (❌/⚠️), not the words "FAIL"/"WARN" —
+# "No failed units" (from status::services, sharing this sandboxed run)
+# contains the substring "fail" and would otherwise false-positive.
+a9_empty=$(mktemp -d); chmod 755 "$a9_empty"
+alerts_run "$a9_empty"
+if ! grep -qi 'no report\|unusable' <<< "$alerts_run_out" \
+   && ! grep -qF '❌' <<< "$alerts_run_out" \
+   && ! grep -qF '⚠️' <<< "$alerts_run_out"; then
+  ok "alerts/empty-dir-silent"
+else
+  fail "alerts/empty-dir-silent"
+  printf '    output: %s\n' "$alerts_run_out"
+fi
+rm -rf "$a9_empty"
+
+alerts_run "/nonexistent/gday-alerts-test-dir"
+gday_exit=0
+env GDAY_FIXTURE_DIR="$alerts_empty_fixtures" GDAY_VAR="$(mktemp -d)" \
+  GDAY_ALERTS_DIR=/nonexistent/gday-alerts-test-dir "$gday" --section status >/dev/null 2>&1 \
+  || gday_exit=$?
+if [[ $gday_exit -eq 0 ]]; then
+  ok "alerts/absent-dir-exit-zero"
+else
+  fail "alerts/absent-dir-exit-zero: exit=$gday_exit"
+fi
+
+rm -rf "$alerts_empty_fixtures"
 
 # ── Degradation: sparse fixture set (many probe outputs absent) ───────────────
 # Simulates missing optional tools by providing a fixture set with only the

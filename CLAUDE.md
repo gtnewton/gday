@@ -145,15 +145,17 @@ is the correct, dependency-free choice. Files MUST be `0644`, root-owned.
 ```
 /usr/local/bin/gday               # main CLI
 /usr/local/lib/gday/              # library, sourced by gday
-  detect.sh hardware.sh banner.sh packages.sh disk.sh os.sh status.sh
-  updates.sh render.sh
+  detect.sh hardware.sh network.sh banner.sh packages.sh disk.sh os.sh
+  status.sh alerts.sh updates.sh render.sh
 /etc/gday/gday.conf               # config
 /etc/gday/status.d/               # user plugins (executable, run as root)
+/etc/gday/banner.txt              # optional: GDAY_BANNER_FILE override art
 /var/lib/gday/                    # caches: banner.txt hardware.txt packages.txt
                                   #         pkgs.txt updates.txt smart.txt
                                   # install state: install-rollback.txt,
                                   #         motd.orig (both consumed/removed
                                   #         by uninstall.sh — see §20)
+/var/lib/gday/alerts.d/           # producer-written *.alerts drop-ins (§11)
 /etc/systemd/system/gday-*.{service,timer}
 /etc/motd                         # assembled output (overwritten each refresh)
 ```
@@ -164,8 +166,13 @@ Presentation is fixed so the implementation cannot drift.
 
 - **Target width: 80 columns.** Content MUST fit; rules span the full width.
   No per-terminal adaptation (timer has no tty).
-- **Section order (fixed):** banner → HARDWARE → DISK USAGE → OPERATING
-  SYSTEM → STATUS → EXPLICITLY INSTALLED → footer.
+- **Section order (fixed):** banner → HARDWARE → NETWORK → DISK USAGE →
+  OPERATING SYSTEM → STATUS → EXPLICITLY INSTALLED → footer.
+- **Total length budget: ~45 lines.** No section is ever truncated to fit —
+  this is a warning threshold, not enforcement. `gday::assemble` warns once
+  to stderr (§14) when assembled output exceeds it. Added when the section
+  count grew past four; a login banner long enough to scroll is how motds
+  end up `chmod -x`'d by their own users.
 - **Section headers:** one space, emoji, two spaces, upper-case label, one
   space, then a box-drawing rule (`─`) to column 80.
 - **Body rows:** three-space indent; label in a fixed-width left column
@@ -209,6 +216,24 @@ Render at static-refresh into `banner.txt` from `hostname -s`. Use
 hostname fallback. Subtitle: `<host> · <PRETTY_NAME> · <DE+version · session>`
 (drop DE clause if headless).
 
+**Override hook**, two knobs, both `gday.conf` keys:
+- `GDAY_BANNER_FILE=/etc/gday/banner.txt` — when set and readable, its
+  content replaces the figlet/toilet/box art verbatim (unset ⇒ unchanged
+  current behaviour). Not centred like figlet output — an operator supplying
+  fixed art (e.g. a department logo) owns its own layout. Tabs MUST be
+  expanded before `render::sanitize` runs (its control-byte strip range
+  includes 0x09, so an un-expanded tab is silently deleted, shifting every
+  later character) and lines MUST be truncated to `GDAY_WIDTH`, with the
+  total line count capped (20), each clamp logged once to stderr if it fires.
+- `GDAY_BANNER_SUBTITLE=0` — suppresses the computed subtitle line (default:
+  on). Not optional alongside the first knob: without it, a fixed-logo
+  profile cannot drop a subtitle that doesn't fit without patching
+  `lib/banner.sh` — the exact fork the hook exists to prevent.
+
+Static-tier cached like the rest of the banner: editing `GDAY_BANNER_FILE`'s
+content takes effect at the next `gday --refresh`/`--static` or boot/daily
+timer fire, not immediately.
+
 ### Hardware (`lib/hardware.sh`, static) — privileged fields degrade
 Exact keys are load-bearing for cross-distro consistency:
 
@@ -216,6 +241,7 @@ Exact keys are load-bearing for cross-distro consistency:
 |---|---|---|
 | System | `dmidecode -t system` | Manufacturer, Product Name, Version (→ "rev"), Serial Number |
 | Mainboard | `dmidecode -t baseboard` | Manufacturer, Product Name, Version (rev for component lookup) |
+| BIOS | `dmidecode -t 0` | Vendor, Version, Release Date. Added for the server case, not lab parity |
 | CPU | `lscpu` | Model name; cores/threads as `4C / 8T` |
 | Memory | `/proc/meminfo` total; `dmidecode -t memory` per-DIMM | total always available; DIMM detail root-only |
 | GPU | `lspci` VGA/3D/Display class | MAY be multiple |
@@ -224,6 +250,28 @@ Exact keys are load-bearing for cross-distro consistency:
 No root ⇒ omit serials, per-DIMM detail, SMART; print the unprivileged subset
 plus one advisory line that running the static tier as root enables serial
 numbers and SMART.
+
+### Network (`lib/network.sh`, assemble — live)
+Link state and IP change without a reboot, and every probe here is a cheap
+file read, so unlike hardware/packages this is **never cached** — wired
+through `gday::_emit` like disk/os/status, not `gday::_cached`.
+
+Interface resolution, in order:
+1. `GDAY_NET_IFACE` config override, if set.
+2. The `dev` of the default route with the lowest metric, from
+   `ip -4 route show default` (ties keep the route table's own order).
+3. Otherwise **omit the entire section** — do not guess. (Deliberately not
+   `ls /sys/class/net | awk '! /wl|lo/'`: that concatenates every interface
+   name into one variable on any machine with `docker0`/`virbr0`/a bridge.)
+
+| Row | Source (exact) |
+|---|---|
+| Interface | resolved name + `/sys/class/net/<if>/operstate` |
+| Speed/Duplex | `/sys/class/net/<if>/speed` and `/duplex`. Omit on `-1` or a read error — what wireless and most virtual interfaces return |
+| IPv4 | `ip -4 addr show dev <if>`, first `inet`, `/prefix` stripped |
+| MAC | `/sys/class/net/<if>/address` |
+
+IPv6 is out of scope for v1 (§22).
 
 ### Disk usage (`lib/disk.sh`, assemble — live)
 Report one row per real mount; **exclude** pseudo filesystems (tmpfs, devtmpfs,
@@ -254,6 +302,88 @@ Core glyph-flagged lines:
   installed.
 - **Services** — `systemctl --failed --no-legend | wc -l`.
 - **Disks** — summarise SMART results cached by the static tier.
+- **Alerts** — see the dedicated subsection below, rendered between Disks and
+  the `status.d` plugins.
+
+#### Alerts (`lib/alerts.sh`, assemble)
+A core facility for surfacing actionable problems detected by external
+programs gday does not itself run (§18: no network access in any tier, and
+the assemble tier must stay cheap — it fires every 5 min). A producer writes
+a small text file; gday reads it and renders the non-PASS rows into STATUS
+with a pointer to the fix. This is mechanism, not policy — any producer gets
+the same affordance with no gday code change. gday MUST NOT run the producer
+itself; that is a scheduler's job (e.g. a root `cron.d` entry), because the
+data has its own natural period (nightly jobs checked more than once a day
+cannot produce a different answer) and because gday owning the producer's
+runtime/exit codes/failure modes would collapse the decoupling this design
+exists to create.
+
+**Format — `gday-alerts v1`.** One file per producer, `*.alerts`, UTF-8, LF
+endings, in `GDAY_ALERTS_DIR` (default `/var/lib/gday/alerts.d`, `0755`
+root-owned; files `0644` root-owned). Never JSON — parsing it in bash means a
+`jq` dependency (§7's rationale, generalised) and JSON's all-or-nothing
+parsing is incompatible with gday's per-row degradation contract (§5): one
+producer's unescaped quote must not blank the whole section.
+
+| Line form | Meaning |
+|---|---|
+| `# ...` | Comment (conventionally the version banner on line 1; not required) |
+| `@ key=value` | Header. Unknown keys MUST be ignored, not an error |
+| `SEV<TAB>label<TAB>message[<TAB>docref]` | One record |
+| empty | Ignored |
+
+Headers, all optional: `source` (default: filename minus `.alerts`; display
+text only — see below), `generated` (ISO 8601; default: the file's mtime, so
+this can never be a hard failure), `expires` (`NNh`/`NNm`; default
+`GDAY_ALERTS_MAX_AGE`, 26h).
+
+Record fields, tab-separated, no literal tabs/newlines within a field:
+**severity** — `FAIL` or `WARN`, a closed set; anything else drops that row
+only. There is deliberately no `PASS` — producers filter, gday does not.
+**label** — short noun phrase (SHOULD be ≤ 20 chars). **message** — one line
+(SHOULD be ≤ 50 chars; longer wraps via `render::wrap`). **docref** —
+optional free text (path/anchor/runbook section) rendered on a continuation
+line as `→ <docref>`; gday does not resolve or validate it, only sanitizes it
+like any other probe output (§17).
+
+Render order: all `FAIL` rows before all `WARN` rows; producers in filename
+order; records in file order within a producer.
+
+**Staleness and silence — the part that matters.** A producer that stopped
+running MUST NOT look like a producer with nothing to report:
+
+| State | Output |
+|---|---|
+| Fresh file, zero records | nothing (producer ran, all clear) |
+| Fresh file, N records | the N rows |
+| File older than `expires` | `⚠️ <source>: no report since <date>` — records **not** shown |
+| Declared producer, no file at all | `⚠️ <source>: no report file` |
+| Declared producer, file rejected (ownership/mode — see below) or unreadable | `⚠️ <source>: report file unusable` — records **not** shown |
+
+"Declared" means named in `GDAY_ALERTS_EXPECT` (space-separated source
+names; empty default ⇒ no expectations, no warnings) — matched against the
+file's **basename**, since the `@ source=` header is display text only, not
+identity, so a rejected file (whose content gday refuses to trust) can still
+be recognised as a declared producer from its filename alone. **Undeclared**
+producers' rejected files are skipped silently — gday has no expectation to
+disappoint, and warning about every stray file in a drop-in directory would
+be noise. The rejected-file line MUST NOT name the reason (mode/owner/
+unreadable) — that detail goes to stderr at the assemble tier only; the
+banner reader cannot act on it and it is one more free-text surface on a
+phishing target (`/etc/motd` is exactly that).
+
+Files get the same ownership/mode discipline as `status.d` plugins —
+`status::_plugin_safe` (§12) is reused unchanged, not reimplemented: owned by
+root or the invoking user, never group/other-writable.
+
+`GDAY_ALERTS_MAX_ROWS` (default 8) caps rows shown **per producer**; beyond
+it, `… and N more → <docref of the last shown row, or the source name>`. A
+runaway producer MUST NOT be able to push the banner to 200 lines.
+
+Config keys (`gday.conf`): `GDAY_ALERTS_DIR` (an externally supplied path,
+§17 — MUST be validated absolute; a merely-nonexistent directory is a normal
+silent state, not a config error), `GDAY_ALERTS_MAX_AGE`, `GDAY_ALERTS_MAX_ROWS`,
+`GDAY_ALERTS_EXPECT`.
 
 ### Packages (`lib/packages.sh`, static)
 Full list → `pkgs.txt`; inline shows count + first N alphabetical (N from
@@ -287,8 +417,9 @@ Run by `gday-refresh` (inherit root), output appended to STATUS.
 Shell-sourced `KEY=value`. **Precedence: compiled defaults < `gday.conf` < CLI
 options.** An invalid value MUST warn (journal/stderr) and fall back to the
 default; it MUST NOT abort (consistent with §1). Keys at minimum: enabled
-sections, disk include/exclude globs, bar width, package inline cap N,
-cadences, emoji/accent toggle.
+sections, banner override file + subtitle toggle, network interface override,
+disk include/exclude globs, bar width, package inline cap N, alerts
+directory/max-age/max-rows/expect, cadences, emoji/accent toggle.
 
 ## 14. Logging
 
@@ -304,6 +435,9 @@ cadences, emoji/accent toggle.
   line; the rest renders.
 - Headless ⇒ omit Desktop line.
 - figlet/toilet absent ⇒ fallback banner.
+- No default route and no `GDAY_NET_IFACE` override ⇒ omit the whole NETWORK
+  section, not a header with nothing under it.
+- Absent or empty `alerts.d` ⇒ silent (most machines never run a producer).
 - A failing `status.d` plugin never breaks assembly.
 
 ## 16. Shell coding standards
@@ -360,8 +494,8 @@ a deliberate no.
 - `gday --write-motd` — assemble from existing caches + live probes and write
   `/etc/motd`, without rebuilding either cache tier. Used by
   `gday-refresh.service`.
-- `gday --section <banner|hardware|disk|os|status|packages>` — emit one
-  section to stdout. Primary debug and test affordance.
+- `gday --section <banner|hardware|network|disk|os|status|packages>` — emit
+  one section to stdout. Primary debug and test affordance.
 - `gday --version`.
 - `gday -h` / `gday --help`.
 
@@ -416,6 +550,8 @@ and a degradation test with optional commands forced absent.
 - ANSI colour in addition to emoji, or emoji only? (Config-gated either way.)
 - Logged-in user count (as-of-refresh) as a core STATUS line, or a plugin?
 - Merge snap/flatpak/pipx/cargo when detected, or strictly PM-only for v1?
+- IPv6 for the Network section — out of scope for v1; revisit if a real
+  machine needs it.
 
 ## Project state
 

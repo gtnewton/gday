@@ -2,9 +2,67 @@
 # banner.sh — top-of-MOTD hostname banner + subtitle (CLAUDE.md §11). Static
 # tier: rendered once into banner.txt. figlet/toilet are refresh-time optional
 # (§2.6); absent ⇒ a plain bordered fallback. Never fails the assembly.
+#
+# GDAY_BANNER_FILE/GDAY_BANNER_SUBTITLE are read at static-refresh time, same
+# as everything else here: editing GDAY_BANNER_FILE's content changes nothing
+# in /etc/motd until the next `gday --refresh`/`--static` or the next boot/
+# daily timer fire, not immediately.
 
 [[ -n ${GDAY_BANNER_SH:-} ]] && return 0
 GDAY_BANNER_SH=1
+
+# Ceiling on override-banner line count (§4.1 of
+# planning/gday-development-guide.md) — protects the §9 80-column/total-length
+# invariants against an oversized GDAY_BANNER_FILE.
+readonly GDAY_BANNER_MAX_LINES=20
+
+# banner::_override_art — the verbatim contents of GDAY_BANNER_FILE, when set
+# and readable (§17: an externally supplied path is validated — must be a
+# regular, readable file), or "" to fall through to the normal figlet/toilet/
+# box logic below. Unlike the figlet path this is NOT centred: an operator
+# supplying fixed art (e.g. a department logo) owns its own layout.
+#
+# Tabs are expanded *before* sanitizing: render::sanitize (render.sh) strips
+# 0x00-0x1F/0x7F, and 0x09 (tab) is inside that range, so un-expanded tabs
+# would be silently deleted, shifting every character after them — a bug if
+# missed, not a style choice. Over-wide lines are truncated and the total
+# line count is capped, each logged once to stderr per run if it fires.
+banner::_override_art() {
+  local file=${GDAY_BANNER_FILE:-}
+  [[ -n $file && -f $file && -r $file ]] || return 0
+
+  local raw
+  if command -v expand >/dev/null 2>&1; then
+    raw=$(expand -- "$file" 2>/dev/null) || return 0
+  else
+    raw=$(cat -- "$file" 2>/dev/null) || return 0
+  fi
+  [[ -n $raw ]] || return 0
+
+  local line lines=() n=0 truncated=0 capped=0
+  while IFS= read -r line || [[ -n $line ]]; do
+    line=$(render::sanitize "$line")
+    if (( ${#line} > GDAY_WIDTH )); then
+      line=${line:0:GDAY_WIDTH}
+      truncated=1
+    fi
+    if (( n >= GDAY_BANNER_MAX_LINES )); then
+      capped=1
+      break
+    fi
+    lines+=("$line")
+    (( n++ ))
+  done <<< "$raw"
+
+  (( truncated )) && printf \
+    'gday: warning: %s has lines wider than %d columns; truncated\n' \
+    "$file" "$GDAY_WIDTH" >&2
+  (( capped )) && printf \
+    'gday: warning: %s has more than %d lines; capped\n' \
+    "$file" "$GDAY_BANNER_MAX_LINES" >&2
+
+  printf '%s\n' "${lines[@]}"
+}
 
 # banner::_hostname — short hostname, with fallbacks. Sanitized (§17): a
 # rogue DHCP server can set an arbitrary hostname, and this value is embedded
@@ -17,9 +75,18 @@ banner::_hostname() {
   render::sanitize "${h:-localhost}"
 }
 
-# banner::_art <host> — the figlet/toilet art, or the bordered fallback.
+# banner::_art <host> — GDAY_BANNER_FILE override if set and readable,
+# otherwise the figlet/toilet art, otherwise the bordered fallback.
 banner::_art() {
   local host=$1 art=''
+
+  local override
+  override=$(banner::_override_art)
+  if [[ -n $override ]]; then
+    printf '%s\n' "$override"
+    return 0
+  fi
+
   local font=${GDAY_FIGLET_FONT:-standard}
   if command -v figlet >/dev/null 2>&1; then
     art=$(figlet -f "$font" -w "$GDAY_WIDTH" "$host" 2>/dev/null)
@@ -70,13 +137,20 @@ banner::_subtitle() {
 }
 
 # gday::banner_section — full banner (art + subtitle) to stdout.
+# GDAY_BANNER_SUBTITLE=0 suppresses the subtitle line (default: on) — needed
+# alongside GDAY_BANNER_FILE, since a fixed logo (e.g. a department banner)
+# rarely wants the computed "<host> · <PRETTY_NAME> · ..." line under it, and
+# without this knob suppressing it would mean patching lib/banner.sh, which
+# is the exact fork the override hook exists to prevent.
 gday::banner_section() {
   local host sub pad
   host=$(banner::_hostname)
   banner::_art "$host"
-  printf '\n'
-  sub=$(banner::_subtitle "$host")
-  pad=$(( (GDAY_WIDTH - ${#sub}) / 2 ))
-  (( pad < 0 )) && pad=0
-  printf '%*s%s\n' "$pad" '' "$sub"
+  if [[ ${GDAY_BANNER_SUBTITLE:-1} != 0 ]]; then
+    printf '\n'
+    sub=$(banner::_subtitle "$host")
+    pad=$(( (GDAY_WIDTH - ${#sub}) / 2 ))
+    (( pad < 0 )) && pad=0
+    printf '%*s%s\n' "$pad" '' "$sub"
+  fi
 }

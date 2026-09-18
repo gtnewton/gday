@@ -22,6 +22,12 @@ no per-login work and no shell-specific hooks.
                 AMD/ATI Radeon RX 6700 XT
    Storage      nvme0n1: Generic NVMe SSD 1TB  (931.5G)
 
+ 🌐  NETWORK ───────────────────────────────────────────────────────────────────
+   Interface    eth0 (up)
+   Speed/Duplex 1000 Mb/s (full)
+   IPv4         192.168.1.50
+   MAC          02:11:22:33:44:55
+
  💽  DISK USAGE ────────────────────────────────────────────────────────────────
    /            ▕██████████░░░░░░░░░░░░▏  46%  393G / 915G
    /data        ▕███████████░░░░░░░░░░░▏  54%  935G / 1.8T
@@ -35,6 +41,8 @@ no per-login work and no shell-specific hooks.
    ✅  System up to date
    ✅  No failed units
    ✅  SMART healthy (2 disks)
+   ⚠️  netbootbuild: job not scheduled on this box
+                → GUAVA-RUNBOOK.md#netbootbuild
 
  📦  EXPLICITLY INSTALLED ──────────────────────────────────────────────────────
    Count        12 packages
@@ -52,7 +60,7 @@ Three systemd timer tiers keep the banner fresh without per-login cost:
 |---|---|---|
 | Static | boot + daily | Banner art, hardware, full package list |
 | Updates | hourly | Pending update count, reboot-required flag |
-| Refresh | every 5 min | Reads caches + live disk/uptime → writes `/etc/motd` |
+| Refresh | every 5 min | Reads caches + live network/disk/uptime → writes `/etc/motd` |
 
 The banner is displayed by the system's pam_motd — no shell hooks, no
 `profile.d` scripts, works identically over SSH and at the console.
@@ -60,7 +68,7 @@ The banner is displayed by the system's pam_motd — no shell hooks, no
 ## Requirements
 
 - Linux with systemd and pam_motd
-- bash ≥ 4, standard coreutils (grep, awk, sed, df, …)
+- bash ≥ 4, standard coreutils (grep, awk, sed, df, …), `iproute2` (`ip`)
 - Optional: `figlet` or `toilet` for banner art; `dmidecode`, `smartctl`,
   `lspci` for hardware detail (root-only)
 
@@ -94,7 +102,18 @@ optional; invalid values warn and fall back to defaults.
 
 ```bash
 # Show only these sections (default: all)
-GDAY_SECTIONS='banner hardware disk os status'
+GDAY_SECTIONS='banner hardware network disk os status'
+
+# Replace the figlet/toilet/box banner art with a fixed file's content
+# verbatim (e.g. a department logo). Static-tier cached — after editing the
+# file, run `gday --refresh` (or `--static`) to pick it up.
+GDAY_BANNER_FILE=/etc/gday/banner.txt
+
+# Suppress the computed "<host> · <PRETTY_NAME> · ..." subtitle line
+GDAY_BANNER_SUBTITLE=0
+
+# Network interface to report on (default: the default route's device)
+GDAY_NET_IFACE=eth0
 
 # Limit disk display to specific mounts
 GDAY_DISK_INCLUDE='/ /home /data'
@@ -110,6 +129,19 @@ GDAY_EMOJI=0
 
 # Package names shown inline in the MOTD (default: 12)
 GDAY_PKG_INLINE_N=8
+
+# Where external health-check producers drop *.alerts files (default shown)
+GDAY_ALERTS_DIR=/var/lib/gday/alerts.d
+
+# Age after which a producer's file is stale (default: 26h)
+GDAY_ALERTS_MAX_AGE=26h
+
+# Rows shown per producer before "… and N more" (default: 8)
+GDAY_ALERTS_MAX_ROWS=8
+
+# Producers that MUST report — missing/stale/rejected each get their own
+# warning line instead of silently vanishing (default: none)
+GDAY_ALERTS_EXPECT='guava-morning-check'
 ```
 
 Cadences (static, updates, refresh intervals) live in the systemd `.timer`
@@ -124,7 +156,7 @@ reverting to the shipped default.
 
 ```
 gday                 preview the banner (does not write /etc/motd)
-gday --section os    emit one section for debugging (banner|hardware|disk|os|status|packages)
+gday --section os    emit one section for debugging (banner|hardware|network|disk|os|status|packages)
 gday --refresh       full rebuild + write /etc/motd now
 gday --static        rebuild hardware/packages caches now
 gday --updates       rebuild update count cache now
@@ -156,6 +188,32 @@ and not group/other-writable, or it's silently skipped — plugins run with
 this process's privileges, so the same discipline `sudoers.d` applies to its
 drop-ins applies here.
 
+## Alerts
+
+External health-check scripts (that gday does not run itself — no network
+access, no scheduling) can report actionable problems into STATUS by writing
+a `*.alerts` file to `/var/lib/gday/alerts.d/`:
+
+```
+# gday-alerts v1
+@ source=guava-morning-check
+@ generated=2026-09-17T13:14:09-07:00
+@ expires=26h
+FAIL	unattended-upgrades	u-u has never run on this box	GUAVA-RUNBOOK.md#unattended-upgrades
+WARN	netbootbuild	job not scheduled on this box	GUAVA-RUNBOOK.md#netbootbuild
+```
+
+One producer per file (fields are tab-separated); no `PASS` rows — the
+producer filters, gday only renders. A stale file (older than
+`GDAY_ALERTS_MAX_AGE`) shows a "no report since" line instead of its
+(possibly outdated) records. Naming a producer in `GDAY_ALERTS_EXPECT` makes
+its absence, staleness, or rejection each produce a warning line, instead of
+a stopped producer silently looking like a healthy one.
+
+Files get the same ownership/mode discipline as `status.d` plugins — owned
+by root or the invoking user, never group/other-writable, or they're
+rejected (silently, unless declared in `GDAY_ALERTS_EXPECT`).
+
 ## Graceful degradation
 
 g'day is designed to always produce a useful banner:
@@ -164,6 +222,7 @@ g'day is designed to always produce a useful banner:
 - Not running as root → privileged fields omitted; an advisory line appears
 - figlet/toilet absent → hostname in a plain bordered box
 - Headless system (no DE) → Desktop line omitted
+- No default route → the NETWORK section is omitted entirely
 - Any probe failure → that row omitted; all other sections unaffected
 
 ## Layout

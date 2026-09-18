@@ -82,6 +82,26 @@ hw::mainboard() {
   render::wrap 'Mainboard' "$val"
 }
 
+# hw::bios — BIOS row from `dmidecode -t 0`: vendor, version, release date.
+# Added for the server case (BIOS/firmware provenance matters more on a
+# headless box than a desktop), not for field-for-field parity with 00-hcmc.
+# Same degradation as System/Mainboard: an unprivileged run typically gets a
+# permission-denied dmidecode, which gday::probe already turns into "" (§5).
+hw::bios() {
+  local out vendor ver reldate val
+  out=$(hw::_probe dmidecode-bios dmidecode -t 0)
+  [[ -n $out ]] || return 0
+  vendor=$(hw::_dmi_field "$out" 'Vendor')
+  ver=$(hw::_dmi_field "$out" 'Version')
+  reldate=$(hw::_dmi_field "$out" 'Release Date')
+  val=$vendor
+  [[ -n $ver ]] && val="${val:+$val }${ver}"
+  [[ -n $reldate ]] && val="${val:+$val }(${reldate})"
+  val=${val#"${val%%[![:space:]]*}"}
+  [[ -n $val ]] || return 0
+  render::wrap 'BIOS' "$val"
+}
+
 # hw::cpu — CPU row from `lscpu`: model name + cores/threads as "4C / 8T".
 hw::cpu() {
   local out line model cores=0 threads_per=0 sockets=1 threads val
@@ -244,6 +264,7 @@ gday::hardware_section() {
   render::header '💻' 'HARDWARE'
   hw::system
   hw::mainboard
+  hw::bios
   hw::cpu
   hw::memory
   hw::gpu
