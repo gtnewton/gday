@@ -269,4 +269,7 @@ honest constraint, not a deficiency.
 
 ## License
 
-MIT
+MIT, except `lib/fonts/ansi-shadow.flf`: the third-party ANSI Shadow FIGfont,
+shipped unmodified with its original header. Its author is unrecorded and it
+carries no licence statement; it is included as it is widely redistributed
+in FIGlet font collections.
