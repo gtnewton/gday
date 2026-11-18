@@ -4,6 +4,35 @@ A portable, dependency-light login banner for Linux. A timer regenerates a
 static `/etc/motd`; pam_motd displays it at every login (SSH and console) with
 no per-login work and no shell-specific hooks.
 
+By default the login banner is **brief**: who this machine is, plus only what
+needs attention (or `✅ All clear`):
+
+```
+                            _              _       _
+                        ___| | ___   _ ___| | __ _| |__
+                       / __| |/ / | | / __| |/ _` | '_ \
+                       \__ \   <| |_| \__ \ | (_| | |_) |
+                       |___/_|\_\\__, |___/_|\__,_|_.__/
+                                 |___/
+
+               skylab · Ubuntu 24.04.1 LTS · GNOME 46.2 · wayland
+
+       IPv4         192.168.1.50 (eth0)
+       MAC          02:11:22:33:44:55
+       Uptime       10d 01:15
+       Logged in    alice, greg
+
+       ⚠️  netbootbuild: job not scheduled on this box
+                    → GUAVA-RUNBOOK.md#netbootbuild
+
+────────────────────────────────────────────────────────────────────────────────
+g’day v0.1.0 · generated 2026-06-28 08:30 · gday --full for details
+```
+
+The **full report** — hardware, network, disks, OS, status, packages — is
+saved at every refresh; `gday --full` prints it. Set `GDAY_MOTD_STYLE=full`
+to make it the login banner instead.
+
 ```
                             _              _       _
                         ___| | ___   _ ___| | __ _| |__
@@ -15,42 +44,43 @@ no per-login work and no shell-specific hooks.
                skylab · Ubuntu 24.04.1 LTS · GNOME 46.2 · wayland
 
  💻  HARDWARE ──────────────────────────────────────────────────────────────────
-   System       Acme Systems Workstation Pro (rev 1.0)
-   CPU          AMD Ryzen 7 5800X — 8C / 16T
-   Memory       31.3 GiB
-                2x 16 GB DDR5 @ 4800 MT/s
-   GPU          Intel Corporation UHD Graphics 630
-                AMD/ATI Radeon RX 6700 XT
-   Storage      nvme0n1: Generic NVMe SSD 1TB (931.5G) · S/N S5GXNX0R123456
+       System       Acme Systems Workstation Pro (rev 1.0)
+       CPU          AMD Ryzen 7 5800X — 8C / 16T
+       Memory       31.3 GiB
+                    2x 16 GB DDR5 @ 4800 MT/s
+       GPU          Intel UHD Graphics 630
+                    AMD/ATI Radeon RX 6700 XT
+       Storage      nvme0n1: Generic NVMe SSD 1TB (931.5G) · S/N S5GXNX0R123456
 
  🌐  NETWORK ───────────────────────────────────────────────────────────────────
-   Interface    eth0 (up)
-   Speed/Duplex 1000 Mb/s (full)
-   IPv4         192.168.1.50
-   MAC          02:11:22:33:44:55
+       Interface    eth0 (up)
+       Speed/Duplex 1000 Mb/s (full)
+       IPv4         192.168.1.50
+       MAC          02:11:22:33:44:55
 
  💽  DISK USAGE ────────────────────────────────────────────────────────────────
-   /            ▕██████████░░░░░░░░░░░░▏  46%  393G / 915G
-   /data        ▕███████████░░░░░░░░░░░▏  54%  935G / 1.8T
+       /            ▕██████████░░░░░░░░░░░░▏  46%  393G / 915G
+       /data        ▕███████████░░░░░░░░░░░▏  54%  935G / 1.8T
 
  🐧  OPERATING SYSTEM ──────────────────────────────────────────────────────────
-   OS           Ubuntu 24.04.1 LTS · x86_64
-   Kernel       6.8.0-40-generic
-   Uptime       10d 01:15
+       OS           Ubuntu 24.04.1 LTS · x86_64
+       Kernel       6.8.0-40-generic
+       Uptime       10d 01:15
+       Logged in    alice, greg
 
  📊  STATUS ────────────────────────────────────────────────────────────────────
-   ✅  System up to date
-   ✅  No failed units
-   ✅  SMART healthy (2 disks)
-   ⚠️  netbootbuild: job not scheduled on this box
-                → GUAVA-RUNBOOK.md#netbootbuild
+       ✅  System up to date
+       ✅  No failed units
+       ✅  SMART healthy (2 disks)
+       ⚠️  netbootbuild: job not scheduled on this box
+                    → GUAVA-RUNBOOK.md#netbootbuild
 
  📦  EXPLICITLY INSTALLED ──────────────────────────────────────────────────────
-   Count        355 packages manually installed
-                → cat /var/lib/gday/pkgs.txt
+       Count        355 packages manually installed
+                    → cat /var/lib/gday/pkgs.txt
 
 ────────────────────────────────────────────────────────────────────────────────
-g'day · generated 2026-06-28 08:30
+g’day v0.1.0 · generated 2026-06-28 08:30
 ```
 
 ## How it works
@@ -61,7 +91,7 @@ Three systemd timer tiers keep the banner fresh without per-login cost:
 |---|---|---|
 | Static | boot + daily | Banner art, hardware, full package list |
 | Updates | hourly | Pending update count, reboot-required flag |
-| Refresh | every 5 min | Reads caches + live network/disk/uptime → writes `/etc/motd` |
+| Refresh | every 5 min | Reads caches + live network/disk/uptime → writes `/etc/motd` and the full report |
 
 The banner is displayed by the system's pam_motd — no shell hooks, no
 `profile.d` scripts, works identically over SSH and at the console.
@@ -153,12 +183,14 @@ reverting to the shipped default.
 ## CLI
 
 ```
-gday                 preview the banner (does not write /etc/motd)
+gday                 preview the login banner live (GDAY_MOTD_STYLE; does not write /etc/motd)
+gday --full          print the full report saved at the last refresh
+gday --brief         assemble the brief banner live, regardless of GDAY_MOTD_STYLE
 gday --section os    emit one section for debugging (banner|hardware|network|disk|os|status|packages)
 gday --refresh       full rebuild + write /etc/motd now
 gday --static        rebuild hardware/packages caches now
 gday --updates       rebuild update count cache now
-gday --write-motd    assemble from existing caches + write /etc/motd (used by gday-refresh.service)
+gday --write-motd    write /etc/motd (GDAY_MOTD_STYLE) + the full report (used by gday-refresh.service)
 gday --version       print version
 gday --help          this help
 ```
@@ -180,6 +212,12 @@ Example plugins (inert until activated) are installed to `/etc/gday/status.d/`:
 
 To activate: copy to the same directory without `.example`, set the execute
 bit, and configure the variables at the top of the file.
+
+In the brief banner, only plugin lines that start with ⚠️ or ❌ (the
+`render::status` form) are shown, each with at most its first `→` pointer
+line; plain rows appear in the full report only.
+So a plugin reports its routine facts as rows and its problems as glyph
+lines, and both views come out right with no extra work.
 
 A plugin (and `status.d` itself) must be owned by root or the invoking user
 and not group/other-writable, or it's silently skipped — plugins run with

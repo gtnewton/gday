@@ -119,7 +119,7 @@ emergent property of scattered guards.
 |---|---|---|---|---|
 | Static | `gday-static.service` | boot + daily | banner, hardware, serials, SMART, full package list + `pkgs.txt` | yes (degrades) |
 | Updates | `gday-updates.service` | hourly | pending-update count, reboot-required flag | yes (degrades) |
-| Assemble | `gday-refresh.service` | every 5 min | reads caches + live disk/uptime/load/failed-units + runs `status.d` → writes `/etc/motd` | yes |
+| Assemble | `gday-refresh.service` | every 5 min | reads caches + live disk/uptime/load/failed-units + runs `status.d` → writes `/etc/motd` (brief or full, §9) + `report.txt` (full) | yes |
 
 - Cadences live in the `.timer` units and MUST be overridable via
   `gday.conf`. Static uses `OnBootSec=` plus a daily `OnCalendar=`; refresh uses
@@ -152,6 +152,8 @@ is the correct, dependency-free choice. Files MUST be `0644`, root-owned.
 /etc/gday/banner.txt              # optional: GDAY_BANNER_FILE override art
 /var/lib/gday/                    # caches: banner.txt hardware.txt packages.txt
                                   #         pkgs.txt updates.txt smart.txt
+                                  # report.txt: full report, refresh tier
+                                  #         (what `gday --full` prints)
                                   # install state: install-rollback.txt,
                                   #         motd.orig (both consumed/removed
                                   #         by uninstall.sh — see §20)
@@ -168,11 +170,12 @@ Presentation is fixed so the implementation cannot drift.
   No per-terminal adaptation (timer has no tty).
 - **Section order (fixed):** banner → HARDWARE → NETWORK → DISK USAGE →
   OPERATING SYSTEM → STATUS → EXPLICITLY INSTALLED → footer.
-- **Total length budget: ~60 lines.** No section is ever truncated to fit —
-  this is a warning threshold, not enforcement. `gday::assemble` warns once
-  to stderr (§14) when assembled output exceeds it — **only when stderr is a
-  terminal** (dev/interactive runs); the timer-driven services stay silent. Added when the section
-  count grew past four; a login banner long enough to scroll is how motds
+- **Total length budget (full report): ~60 lines.** No section is ever
+  truncated to fit — this is a warning threshold, not enforcement.
+  `gday::assemble` warns once to stderr (§14) when the full report exceeds
+  it — **only when stderr is a terminal** (dev/interactive runs); the
+  timer-driven services stay silent. Added when the section count grew past
+  four; a login banner long enough to scroll is how motds
   end up `chmod -x`'d by their own users. Raised 45 → 60 on 2026-11-18: after
   NETWORK landed, the default 7-section layout on a real machine is ~55 lines,
   so 45 fired on every 5-min refresh (27 journal lines/day on figue (work)) —
@@ -181,14 +184,45 @@ Presentation is fixed so the implementation cannot drift.
   space, then a box-drawing rule (`─`) to column 80.
 - **Body rows:** seven-space indent (`GDAY_INDENT` — deeper than the header
   label at column 5, so contents nest visibly under their title); label in a
-  fixed-width left column (SHOULD be 12 chars), value follows at column 20. `render.sh` MUST expose one alignment
-  helper that core sections and plugins share.
+  fixed-width left column (SHOULD be 12 chars), value follows at column 20.
+  `render.sh` MUST expose one alignment helper that core sections and
+  plugins share.
 - **Bars:** filled `█`, empty `░`, caps `▕ ▏`. Width from `gday.conf`
   (default 22 cells).
 - **Status glyphs:** ✅ ok, ⚠️ attention, ❌ fault.
 - **Footer:** `g'day · generated YYYY-MM-DD HH:MM` (smart apostrophe is fine in
   text).
 - Long values (e.g. package list) MUST wrap within the indent, not overflow.
+
+### Brief vs full (2026-11-18)
+
+Two views of one collected dataset. `/etc/motd` carries one of them, chosen
+by `GDAY_MOTD_STYLE=brief|full` (default **brief**); the refresh tier always
+also writes the full report to `$GDAY_VAR/report.txt`, which `gday --full`
+prints. A login-time flag is impossible by construction (pam_motd cats a
+static file), so the switch is config plus an on-demand command.
+
+- **Full** is the §9 layout above, unchanged.
+- **Brief** is a second renderer (`gday::_render_brief`), not a mode threaded
+  through the sections: banner art + subtitle; identity rows (`IPv4`
+  `<addr> (<iface>)`, `MAC`, `Uptime`, `Logged in` — same labels/helpers as
+  the full sections, each omitted if its probe fails); a blank line; then
+  only lines needing attention; `✅ All clear` if there are none; footer
+  gains `· gday --full for details`. SHOULD stay ≤ ~20 lines.
+- **Attention lines:** mounts at or over `GDAY_BRIEF_DISK_PCT` (default 85),
+  then STATUS filtered by one rule (`gday::_brief_status_filter`): keep
+  ⚠️/❌-led lines (and their `GDAY_EMOJI=0` ASCII forms), the **first** `→`
+  pointer line under each, and any `…` overflow line; drop ✅ lines, plain
+  rows, further pointers and value-column continuation detail (e.g. failed
+  unit names). A producer orders its pointers so the first stands alone. The same rule applies to
+  core rows, alerts and `status.d` output (§12).
+- Sections are collected **once** per refresh (`gday::_collect`) and both
+  views render from that, so plugins/systemctl/alerts run once and the two
+  views cannot disagree.
+- `gday --full` prints the saved report rather than re-probing: plugins and
+  SMART ran as root at refresh, so a non-root live run would show a
+  different, poorer report. No report yet ⇒ live full assemble. Everything
+  in it was already world-readable in the full `/etc/motd`.
 
 ## 10. Detection layer (`lib/detect.sh`)
 
@@ -289,6 +323,14 @@ Distro `PRETTY_NAME` + rolling/version, arch; kernel `uname -r`; Desktop line
 from §10; uptime from `/proc/uptime` as `Nd HH:MM`; boot time derived from it.
 *(Date/time formatting is the implementation's choice, subject to §4.)*
 
+Logged in: distinct accounts with a logind session of class `user` as of
+the refresh (`loginctl list-sessions` + `show-session -p Name -p Class`),
+sorted, capped at 5 then `+N more`; `none` if logind answers with no
+sessions; row omitted if logind is unavailable. System-wide (§3), not "who
+is reading this" — the reader's own just-started session is usually not in
+it yet. logind rather than `who`: utmp lists one graphical login twice
+(seat0 + its tty) and is absent on distros that dropped it.
+
 Last login: most recent login on the machine, system-wide — from `last`,
 never personalized to the viewer (§3). Always names the account
 (`<user> from <host> · <date> <time>`, or `<user> · <date> <time>` for a
@@ -305,7 +347,14 @@ Core glyph-flagged lines:
 - **Reboot required** — Debian `/run/reboot-required`; Fedora
   `dnf needs-restarting -r` (exit 1); generic fallback: running kernel ≠ newest
   installed.
-- **Services** — `systemctl --failed --no-legend | wc -l`.
+- **Services** — `systemctl --failed --no-legend | wc -l`. Full report lists
+  every failed unit (no cap) then how to dig in: one unit ⇒
+  `→ systemctl status <name>`, `→ journalctl -b -u <name>`; several ⇒
+  `→ systemctl --failed` first (brief keeps only that line, having dropped
+  the names), then the status/journalctl forms with a `<unit>` placeholder
+  and a short gloss. `reset-failed` deliberately not suggested — it only
+  hides an understood failure until reboot; harmless-failure handling is
+  `FEATURE_REQUEST.md`'s job.
 - **Disks** — summarise SMART results cached by the static tier.
 - **Alerts** — see the dedicated subsection below, rendered between Disks and
   the `status.d` plugins.
@@ -413,6 +462,11 @@ Run by `gday-refresh` (inherit root), output appended to STATUS.
 
 - Executable; numbered filename sets order (`10-backup`, `20-snapraid`).
 - Print `label  value` line(s) to stdout, aligned via the §9 helper.
+- **Brief/full:** only lines led by ⚠️ or ❌ (the `render::status` form) —
+  plus the first `→` pointer line under each, and `…` lines — appear in the
+  brief banner (§9); order pointers so the first makes sense on its own;
+  plain rows are full-report-only. Report routine facts as rows and
+  problems as glyph lines; no other brief-awareness is needed.
 - Exit non-zero or print nothing ⇒ silently skipped (per §5).
 - MUST be fast: runs every refresh. A slow `docker ps` taxes every 5 min.
 - Ship inert `*.sh.example` plugins for restic/SnapRAID/Docker.
@@ -429,7 +483,9 @@ options.** An invalid value MUST warn (journal/stderr) and fall back to the
 default; it MUST NOT abort (consistent with §1). Keys at minimum: enabled
 sections, banner override file + subtitle toggle, network interface override,
 disk include/exclude globs, bar width, alerts
-directory/max-age/max-rows/expect, cadences, emoji/accent toggle.
+directory/max-age/max-rows/expect, cadences, emoji/accent toggle,
+`GDAY_MOTD_STYLE` (brief|full), `GDAY_BRIEF_DISK_PCT`. (`GDAY_MOTD` is the
+motd *path* — an environment override used by tests, not a style key.)
 
 ## 14. Logging
 
@@ -508,16 +564,22 @@ a deliberate no.
 
 ## 19. CLI surface
 
-- `gday` — print assembled output to stdout (test/preview; does not write
-  `/etc/motd`).
+- `gday` — preview `/etc/motd` live: assemble in `GDAY_MOTD_STYLE` (default
+  brief) to stdout; does not write `/etc/motd`. For a live full view:
+  `GDAY_MOTD_STYLE=full gday` (absent a `gday.conf` setting, which wins).
+- `gday --full` — print the full report saved at the last refresh
+  (`report.txt`); live full assemble if none exists yet.
+- `gday --brief` — assemble the brief view live, regardless of style.
 - `gday --refresh` — full rebuild now (static tier + updates tier), write
   `/etc/motd`.
 - `gday --static` — rebuild static tier now.
 - `gday --updates` — rebuild updates tier (pending-update count, reboot flag)
   now.
-- `gday --write-motd` — assemble from existing caches + live probes and write
-  `/etc/motd`, without rebuilding either cache tier. Used by
-  `gday-refresh.service`.
+- `gday --write-motd` — assemble from existing caches + live probes; write
+  `/etc/motd` (per `GDAY_MOTD_STYLE`) and `report.txt` (full), without
+  rebuilding either cache tier. Used by `gday-refresh.service`. Only a
+  failed `/etc/motd` write is an operation failure; a failed `report.txt`
+  write warns.
 - `gday --section <banner|hardware|network|disk|os|status|packages>` — emit
   one section to stdout. Primary debug and test affordance.
 - `gday --version`.
@@ -572,7 +634,9 @@ and a degradation test with optional commands forced absent.
 ## 22. Open minor questions (decide in-build, non-blocking)
 
 - ANSI colour in addition to emoji, or emoji only? (Config-gated either way.)
-- Logged-in user count (as-of-refresh) as a core STATUS line, or a plugin?
+- ~~Logged-in user count as a core STATUS line, or a plugin?~~ Decided
+  2026-11-18: core, as a `Logged in` row (names, not a count) in OS and in
+  brief's identity rows — see §11 OS.
 - Merge snap/flatpak/pipx/cargo when detected, or strictly PM-only for v1?
 - IPv6 for the Network section — out of scope for v1; revisit if a real
   machine needs it.

@@ -45,13 +45,18 @@ gday::_load_conf() {
   # regardless of whether a conf file was found, so a value pre-set in the
   # environment (e.g. by tests) gets the same validation as one from the file.
   local v val
-  for v in GDAY_BAR_WIDTH GDAY_ALERTS_MAX_ROWS; do
+  for v in GDAY_BAR_WIDTH GDAY_ALERTS_MAX_ROWS GDAY_BRIEF_DISK_PCT; do
     val=${!v:-}
     if [[ -n $val && ! $val =~ ^[0-9]+$ ]]; then
       printf 'gday: warning: invalid %s=%q in %s; using default\n' "$v" "$val" "$conf" >&2
       unset "$v"
     fi
   done
+  if [[ -n ${GDAY_MOTD_STYLE:-} && $GDAY_MOTD_STYLE != brief && $GDAY_MOTD_STYLE != full ]]; then
+    printf 'gday: warning: invalid GDAY_MOTD_STYLE=%q in %s (brief|full); using brief\n' \
+      "$GDAY_MOTD_STYLE" "$conf" >&2
+    unset GDAY_MOTD_STYLE
+  fi
   # GDAY_ALERTS_DIR is an externally supplied path (§17) and MUST be
   # validated before use: it must be absolute. Existence is checked at read
   # time by lib/alerts.sh — an absent directory is a normal, silent state
@@ -130,41 +135,153 @@ gday::_cached() {
 }
 
 gday::footer() {
+  local hint=${1:-}
   render::rule
-  printf "g’day v%s · generated %s\n" "$GDAY_VERSION" "$(date '+%Y-%m-%d %H:%M')"
+  printf "g’day v%s · generated %s%s\n" "$GDAY_VERSION" "$(date '+%Y-%m-%d %H:%M')" \
+    "${hint:+ · $hint}"
 }
 
-gday::assemble() {
+# gday::_collect — run every enabled section exactly once into _G_<name>.
+# Both renderers draw from these, so a refresh that writes the brief MOTD and
+# the full report runs plugins, systemctl and alerts once, not twice — and
+# the two views cannot disagree about what they saw.
+gday::_collect() {
   gday::detect
   # GDAY_SECTIONS: space-separated list of enabled sections (§13). Fixed
   # render order is always preserved (§9); this only controls which appear.
   local sections=${GDAY_SECTIONS:-banner hardware network disk os status packages}
   gday::_sec_on() { case " $sections " in *" $1 "*) return 0 ;; esac; return 1; }
+  _G_banner='' _G_hardware='' _G_network='' _G_disk='' _G_os='' _G_status='' _G_packages=''
+  if gday::_sec_on banner;   then _G_banner=$(gday::_cached banner gday::banner_section); fi
+  if gday::_sec_on hardware; then _G_hardware=$(gday::_cached hardware gday::hardware_section); fi
+  if gday::_sec_on network;  then _G_network=$(gday::_emit gday::network_section); fi
+  if gday::_sec_on disk;     then _G_disk=$(gday::_emit gday::disk_section); fi
+  if gday::_sec_on os;       then _G_os=$(gday::_emit gday::os_section); fi
+  if gday::_sec_on status;   then _G_status=$(gday::_emit gday::status_section); fi
+  if gday::_sec_on packages; then _G_packages=$(gday::_cached packages gday::packages_section); fi
+}
 
-  local body
-  body=$(
-    gday::_sec_on banner   && { gday::_cached banner   gday::banner_section   ; printf '\n'; }
-    gday::_sec_on hardware && { gday::_cached hardware gday::hardware_section ; printf '\n'; }
-    gday::_sec_on network  && { gday::_emit gday::network_section            ; printf '\n'; }
-    gday::_sec_on disk     && { gday::_emit gday::disk_section                ; printf '\n'; }
-    gday::_sec_on os       && { gday::_emit gday::os_section                  ; printf '\n'; }
-    gday::_sec_on status   && { gday::_emit gday::status_section              ; printf '\n'; }
-    gday::_sec_on packages && { gday::_cached packages gday::packages_section ; printf '\n'; }
-    gday::footer
-  )
+# gday::_render_full — the full report (§9 layout) from collected sections.
+# An empty section (e.g. NETWORK with no resolvable interface) leaves no gap.
+gday::_render_full() {
+  local sec
+  for sec in "$_G_banner" "$_G_hardware" "$_G_network" "$_G_disk" "$_G_os" \
+             "$_G_status" "$_G_packages"; do
+    if [[ -n $sec ]]; then printf '%s\n\n' "$sec"; fi
+  done
+  gday::footer
+}
 
-  # §9 length budget: a soft, non-blocking warning (§5 — never abort on a
-  # cosmetic threshold, only on a failed requested operation). Dev-time only:
-  # emitted when stderr is a terminal, so the timers (stderr → journal) stay
-  # silent per §14 — nobody can act on it from the journal every 5 min.
+# gday::_brief_status_filter — keep only STATUS lines needing attention: a
+# ⚠️/❌-led line (or its GDAY_EMOJI=0 ASCII form), the FIRST → pointer under
+# it (a producer orders its pointers so the first stands alone), and any …
+# overflow line. Applies identically to core rows, alerts and status.d
+# plugin output — no plugin API change; a plugin's plain informational rows
+# are simply full-report-only.
+gday::_brief_status_filter() {
+  local line t keep=0 ptr=0
+  while IFS= read -r line; do
+    t=${line#"${line%%[![:space:]]*}"}             # strip leading whitespace
+    case $t in
+      ⚠*|❌*|'[!!]'*|'[XX]'*) keep=1; ptr=0; printf '%s\n' "$line" ;;
+      →*) if (( keep && ! ptr )); then ptr=1; printf '%s\n' "$line"; fi ;;
+      …*) if (( keep )); then printf '%s\n' "$line"; fi ;;
+      *)
+        # A continuation line (indented to the value column, e.g. a failed
+        # unit's name) is detail: dropped, but it doesn't end the kept block,
+        # so the pointer below it survives. Anything shallower is a new row.
+        if (( ${#line} - ${#t} < GDAY_VALUE_COL )); then keep=0; fi ;;
+    esac
+  done
+}
+
+# gday::_brief_disks — one ⚠️ line per mount at or over GDAY_BRIEF_DISK_PCT.
+gday::_brief_disks() {
+  local limit=${GDAY_BRIEF_DISK_PCT:-85} target pct used size
+  while IFS=$'\t' read -r target pct used size; do
+    [[ -n $target && $pct =~ ^[0-9]+$ ]] || continue
+    if (( pct >= limit )); then
+      render::status "$GDAY_WARN" "${target} ${pct}% full ($(render::hkib "$used") / $(render::hkib "$size"))"
+    fi
+  done < <(disk::mounts)
+}
+
+# gday::_brief_identity — the always-present machine rows: IPv4 (iface), MAC,
+# uptime, who is logged in. Same labels and helpers as the full NETWORK and
+# OS sections, so the two views agree; each row omitted if its probe fails.
+gday::_brief_identity() {
+  local iface v
+  iface=$(network::_iface) || iface=''
+  if [[ -n $iface ]]; then
+    v=$(network::_ipv4 "$iface") || v=''
+    if [[ -n $v ]]; then render::row 'IPv4' "${v} (${iface})"; fi
+    v=$(network::_mac "$iface") || v=''
+    if [[ -n $v ]]; then render::row 'MAC' "$v"; fi
+  fi
+  v=$(os::uptime_str) || v=''
+  if [[ -n $v ]]; then render::row 'Uptime' "$v"; fi
+  os::logged_in
+}
+
+# gday::_render_brief — banner, one summary line, then only what needs
+# attention; "All clear" otherwise. A second renderer over the same collected
+# data: the full layout is untouched by its existence.
+gday::_render_brief() {
+  if [[ -n $_G_banner ]]; then printf '%s\n\n' "$_G_banner"; fi
+  gday::_emit gday::_brief_identity
+  printf '\n'
+  local attn='' part
+  if [[ -n $_G_disk ]]; then
+    part=$(gday::_emit gday::_brief_disks); if [[ -n $part ]]; then attn+=$part$'\n'; fi
+  fi
+  if [[ -n $_G_status ]]; then
+    part=$(gday::_brief_status_filter <<< "$_G_status" || true)
+    if [[ -n $part ]]; then attn+=$part$'\n'; fi
+  fi
+  if [[ -n $attn ]]; then
+    printf '%s' "$attn"
+  else
+    render::status "$GDAY_OK" 'All clear'
+  fi
+  printf '\n'
+  gday::footer 'gday --full for details'
+}
+
+# gday::_budget_check <text> — §9 length budget: a soft, non-blocking warning
+# (§5 — never abort on a cosmetic threshold). Dev-time only: emitted when
+# stderr is a terminal, so the timers (stderr → journal) stay silent per §14.
+gday::_budget_check() {
   local lines
-  lines=$(wc -l <<< "$body")
+  lines=$(wc -l <<< "$1")
   if [[ -t 2 ]] && (( lines > GDAY_LENGTH_BUDGET )); then
-    printf 'gday: warning: assembled output is %d lines (budget %d); consider trimming GDAY_SECTIONS\n' \
+    printf 'gday: warning: full report is %d lines (budget %d); consider trimming GDAY_SECTIONS\n' \
       "$lines" "$GDAY_LENGTH_BUDGET" >&2
   fi
+}
 
+# gday::assemble [full|brief] — live assemble to stdout (default: full).
+gday::assemble() {
+  local style=${1:-full} body
+  gday::_collect
+  if [[ $style == brief ]]; then
+    body=$(gday::_render_brief)
+  else
+    body=$(gday::_render_full)
+    gday::_budget_check "$body"
+  fi
   printf '%s\n' "$body"
+}
+
+# gday::show_full — the full report saved at the last refresh (report.txt).
+# Saved rather than re-probed: plugins and SMART ran as root at refresh, so a
+# non-root live run would show a different, poorer report. Falls back to a
+# live full assemble when no report exists yet (before the first refresh).
+gday::show_full() {
+  if [[ -r $GDAY_VAR/report.txt ]]; then
+    cat -- "$GDAY_VAR/report.txt"
+  else
+    gday::assemble full
+  fi
 }
 
 # --- single-section debug affordance (§19) ----------------------------------
@@ -184,26 +301,47 @@ gday::one_section() {
 }
 
 # --- write /etc/motd --------------------------------------------------------
-gday::write_motd() {
-  local content tmp
-  content=$(gday::assemble)
-  tmp=$(mktemp "${GDAY_MOTD}.gday.XXXXXX") || {
-    printf 'gday: cannot create temp file next to %s\n' "$GDAY_MOTD" >&2
+# gday::_atomic_write <path> <content> — mktemp beside the target, 0644, mv.
+gday::_atomic_write() {
+  local path=$1 content=$2 tmp
+  tmp=$(mktemp "${path}.gday.XXXXXX") || {
+    printf 'gday: cannot create temp file next to %s\n' "$path" >&2
     return 1
   }
   printf '%s\n' "$content" > "$tmp" || { rm -f "$tmp"; return 1; }
   chmod 0644 "$tmp"
-  mv -f "$tmp" "$GDAY_MOTD" || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$path" || { rm -f "$tmp"; return 1; }
+}
+
+# gday::write_motd — collect once; write the full report to report.txt and
+# the configured style (GDAY_MOTD_STYLE, default brief) to /etc/motd. Only a
+# failed /etc/motd write is an operation failure (§5); a failed report.txt
+# write warns and leaves `gday --full` showing the previous report.
+gday::write_motd() {
+  local full motd
+  gday::_collect
+  full=$(gday::_render_full)
+  if [[ ${GDAY_MOTD_STYLE:-brief} == full ]]; then
+    motd=$full
+  else
+    motd=$(gday::_render_brief)
+  fi
+  mkdir -p -- "$GDAY_VAR" 2>/dev/null || true
+  gday::_atomic_write "$GDAY_VAR/report.txt" "$full" \
+    || printf 'gday: warning: could not write %s\n' "$GDAY_VAR/report.txt" >&2
+  gday::_atomic_write "$GDAY_MOTD" "$motd"
 }
 
 gday::usage() {
   cat <<'EOF'
 usage: gday [options]
-  (no args)            assemble and print to stdout (does not write /etc/motd)
+  (no args)            preview /etc/motd live: GDAY_MOTD_STYLE, default brief (does not write it)
+  --full               print the full report saved at the last refresh
+  --brief              assemble the brief view live, whatever GDAY_MOTD_STYLE says
   --refresh            full rebuild now and write /etc/motd
   --static             rebuild the static tier caches now
   --updates            rebuild the updates tier cache now
-  --write-motd         assemble from caches and write /etc/motd (used by gday-refresh.service)
+  --write-motd         assemble; write /etc/motd (GDAY_MOTD_STYLE) and the full report
   --section <name>     emit one section (banner|hardware|network|disk|os|status|packages)
   --version            print version
   -h, --help           this help
@@ -212,7 +350,9 @@ EOF
 
 main() {
   case ${1:-} in
-    '')            gday::assemble ;;
+    '')            gday::assemble "${GDAY_MOTD_STYLE:-brief}" ;;
+    --full)        gday::show_full ;;
+    --brief)       gday::assemble brief ;;
     --refresh)     gday::build_static; gday::build_updates; gday::write_motd ;;
     --static)      gday::build_static ;;
     --updates)     gday::build_updates ;;

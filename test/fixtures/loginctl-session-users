@@ -1,0 +1,11 @@
+Name=greg
+Class=user
+
+Name=gdm
+Class=greeter
+
+Name=alice
+Class=user
+
+Name=greg
+Class=user

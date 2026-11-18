@@ -31,6 +31,16 @@ status::reboot() {
   [[ $reboot == 1 ]] && render::status "$GDAY_WARN" 'Reboot required'
 }
 
+# status::_hint <command> <gloss> — a pointer line with its gloss aligned in a
+# column. Padded by character count (render::_len), not printf's %-Ns, which
+# pads by bytes and so under-pads anything containing the 3-byte "→".
+status::_hint() {
+  local cmd=$1 gloss=$2 pad
+  pad=$(( 28 - $(render::_len "$cmd") ))
+  (( pad < 1 )) && pad=1
+  render::cont "${cmd}$(printf '%*s' "$pad" '')${gloss}"
+}
+
 # status::services — live count of failed systemd units.
 status::services() {
   command -v systemctl >/dev/null 2>&1 || [[ -n ${GDAY_FIXTURE_DIR:-} ]] || return 0
@@ -58,10 +68,17 @@ status::services() {
       [[ -z $first ]] && first=$name
       render::cont "$name"
     done <<< "$out"
+    # How to find out more, and why it failed. The first pointer is the one
+    # brief mode keeps (gday::_brief_status_filter keeps only the first →
+    # line), and brief drops the unit names — so with several units the
+    # first pointer must stand alone: `--failed`, not a `<unit>` placeholder.
     if (( n == 1 )) && [[ -n $first ]]; then
       render::cont "→ systemctl status $first"
+      render::cont "→ journalctl -b -u $first"
     else
       render::cont "→ systemctl --failed"
+      status::_hint '→ systemctl status <unit>' 'why it failed + recent log'
+      status::_hint '→ journalctl -b -u <unit>' 'full log since boot'
     fi
   else
     render::status "$GDAY_OK" 'No failed units'

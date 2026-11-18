@@ -1,0 +1,4 @@
+2 1000 greg seat0 tty2 active no -
+c1 120 gdm seat0 tty1 active no -
+7 1001 alice - pts/1 active no -
+9 1000 greg - pts/2 active no -

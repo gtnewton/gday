@@ -36,13 +36,20 @@ os::desktop() {
   [[ -n $val ]] && render::row 'Desktop' "$val"
 }
 
+# os::uptime_str — uptime as "Nd HH:MM", or nothing.
+os::uptime_str() {
+  local secs
+  secs=$(os::_uptime_seconds)
+  [[ $secs =~ ^[0-9]+$ ]] || return 0
+  printf '%dd %02d:%02d' $(( secs / 86400 )) $(( (secs % 86400) / 3600 )) $(( (secs % 3600) / 60 ))
+}
+
 # os::uptime — uptime as "Nd HH:MM" plus the derived boot timestamp.
 os::uptime() {
   local secs
   secs=$(os::_uptime_seconds)
   [[ -n $secs ]] || return 0
-  local d=$(( secs / 86400 )) h=$(( (secs % 86400) / 3600 )) m=$(( (secs % 3600) / 60 ))
-  render::row 'Uptime' "$(printf '%dd %02d:%02d' "$d" "$h" "$m")"
+  render::row 'Uptime' "$(os::uptime_str)"
   local now boot epoch
   now=$(date +%s 2>/dev/null) || return 0
   epoch=$(( now - secs ))
@@ -95,6 +102,62 @@ os::last_login() {
   render::row 'Last login' "$val"
 }
 
+# os::logged_in_users — distinct accounts with a logind session of class
+# "user" right now (as of this refresh), sorted; "none" when logind answers
+# but nobody is logged in; nothing when logind can't be asked (§5: omit).
+# System-wide fact, not personalised (§3): the reader's own just-started
+# login is usually not in it yet — the footer's timestamp says when it was
+# taken. logind, not `who`: utmp double-lists one graphical login (seat0 +
+# its tty) and is absent on distros that have dropped utmp. Class filtering
+# drops the display manager's greeter and per-user service managers.
+os::logged_in_users() {
+  local ids out
+  ids=$(gday::probe loginctl-sessions loginctl list-sessions --no-legend \
+    | awk '$1 ~ /^[[:alnum:]]+$/ {print $1}')
+  if [[ -z $ids ]]; then
+    # logind present but no sessions ⇒ genuinely nobody.
+    # Under the fixture seam, "present" means the fixture exists — never
+    # consult the real machine.
+    if [[ -n ${GDAY_FIXTURE_DIR:-} ]]; then
+      if [[ -r $GDAY_FIXTURE_DIR/loginctl-sessions ]]; then printf 'none'; fi
+    elif command -v loginctl >/dev/null 2>&1; then
+      printf 'none'
+    fi
+    return 0
+  fi
+  local -a idarr
+  readarray -t idarr <<< "$ids"
+  out=$(gday::probe loginctl-session-users loginctl show-session "${idarr[@]}" -p Name -p Class)
+  [[ -n $out ]] || return 0
+  # show-session prints one Key=value block per session, blank-line separated;
+  # property order within a block is logind's, not ours, so collect per block.
+  local names
+  names=$(awk -F= '
+    /^Name=/  { n = substr($0, 6) }
+    /^Class=/ { c = substr($0, 7) }
+    /^$/      { if (c == "user" && n != "") print n; n = ""; c = "" }
+    END       { if (c == "user" && n != "") print n }
+  ' <<< "$out" | sort -u)
+  if [[ -z $names ]]; then printf 'none'; return 0; fi
+  local -a users
+  readarray -t users <<< "$names"
+  local max=5 shown
+  if (( ${#users[@]} > max )); then
+    shown=$(IFS=,; printf '%s' "${users[*]:0:max}")
+    printf '%s +%d more' "${shown//,/, }" $(( ${#users[@]} - max ))
+  else
+    shown=$(IFS=,; printf '%s' "${users[*]}")
+    printf '%s' "${shown//,/, }"
+  fi
+}
+
+# os::logged_in — the "Logged in" row (see os::logged_in_users).
+os::logged_in() {
+  local v
+  v=$(os::logged_in_users)
+  if [[ -n $v ]]; then render::row 'Logged in' "$v"; fi
+}
+
 # gday::os_section — assemble the OPERATING SYSTEM section.
 gday::os_section() {
   render::header '🐧' 'OPERATING SYSTEM'
@@ -102,5 +165,6 @@ gday::os_section() {
   os::kernel
   os::desktop
   os::uptime
+  os::logged_in
   os::last_login
 }

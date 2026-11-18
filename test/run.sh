@@ -80,6 +80,16 @@ fi
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
 
+# Hermetic: never read this machine's installed config, plugins or alerts —
+# a local GDAY_SECTIONS or a real status.d plugin would otherwise change
+# what every test sees. Individual tests override these explicitly.
+export GDAY_CONF=/dev/null
+export GDAY_PLUGIN_DIR="$tmpdir/no-plugins"
+export GDAY_ALERTS_DIR="$tmpdir/no-alerts"
+# The pre-brief-mode suite asserts on the full layout via bare `gday`, which
+# previews GDAY_MOTD_STYLE (default brief). Brief-mode tests unset this.
+export GDAY_MOTD_STYLE=full
+
 section=''
 
 for fdir in "${fixture_dirs[@]}"; do
@@ -575,6 +585,191 @@ if grep -qF '▕' <<< "$out"; then
 else
   fail "degraded/disk-bars-from-sparse-fixture"
 fi
+
+# ── Brief mode (planning/brief-mode-and-package-versions.md §1) ──────────────
+hdr "brief mode"
+unset GDAY_MOTD_STYLE
+fx="$here/test/fixtures"
+bvar=$(mktemp -d)
+printf 'updates=3\nreboot=0\n' > "$bvar/updates.txt"
+
+out=$(GDAY_FIXTURE_DIR="$fx" GDAY_VAR="$bvar" "$gday" --brief 2>/dev/null) || true
+if grep -qF 'gday --full for details' <<< "$out" && ! grep -qF 'HARDWARE' <<< "$out" \
+   && ! grep -qF 'STATUS' <<< "$out"; then
+  ok "brief/no-section-headers-footer-hint"
+else
+  fail "brief/no-section-headers-footer-hint"
+fi
+if grep -qF '3 updates available' <<< "$out" && grep -qF '1 failed unit' <<< "$out" \
+   && grep -qF '→ systemctl status fwupd-refresh.service' <<< "$out"; then
+  ok "brief/attention-lines-and-pointer-kept"
+else
+  fail "brief/attention-lines-and-pointer-kept"
+fi
+# Continuation detail (the unit name line) is dropped; ✅ lines are dropped.
+if ! grep -qE '^ +fwupd-refresh\.service$' <<< "$out" && ! grep -qF '✅' <<< "$out"; then
+  ok "brief/detail-and-ok-lines-dropped"
+else
+  fail "brief/detail-and-ok-lines-dropped"
+fi
+if grep -qE '^ +IPv4 +[0-9.]+ \(eth0\)$' <<< "$out" && grep -qE '^ +MAC +' <<< "$out" \
+   && grep -qE '^ +Uptime +[0-9]+d [0-9]{2}:[0-9]{2}$' <<< "$out"; then
+  ok "brief/identity-rows"
+else
+  fail "brief/identity-rows"
+fi
+# Logged in: distinct user-class accounts, sorted; greeter (gdm) excluded,
+# greg's two sessions collapse to one name.
+if grep -qE '^ +Logged in +alice, greg$' <<< "$out"; then
+  ok "brief/logged-in-users"
+else
+  fail "brief/logged-in-users"
+fi
+
+# Disk threshold: fixture max is 54% (/data).
+out=$(GDAY_FIXTURE_DIR="$fx" GDAY_VAR="$bvar" GDAY_BRIEF_DISK_PCT=50 "$gday" --brief 2>/dev/null) || true
+if grep -qF '/data 54% full' <<< "$out" && ! grep -qF '/boot/efi' <<< "$out"; then
+  ok "brief/disk-over-threshold-only"
+else
+  fail "brief/disk-over-threshold-only"
+fi
+
+# All clear: no updates, no failed units (no systemctl-failed fixture), no hot disks.
+sparse_b=$(mktemp -d)
+cp "$fx"/{os-release,uptime,hostname,df} "$sparse_b/"
+printf 'updates=0\nreboot=0\n' > "$bvar/updates.txt"
+out=$(GDAY_FIXTURE_DIR="$sparse_b" GDAY_VAR="$bvar" "$gday" --brief 2>/dev/null) || true
+if grep -qF 'All clear' <<< "$out"; then
+  ok "brief/all-clear"
+else
+  fail "brief/all-clear"
+fi
+
+# Plugin rule: only ⚠️/❌-led plugin lines reach brief; plain rows are full-only.
+pdir="$bvar/status.d"; mkdir -p "$pdir"; chmod 0755 "$pdir"
+cat > "$pdir/10-mixed" <<'PLUG'
+#!/usr/bin/env bash
+printf '       %-12s %s\n' 'Info row' 'informational only'
+printf '       ⚠️  plugin needs attention\n'
+PLUG
+chmod 0755 "$pdir/10-mixed"
+out=$(GDAY_FIXTURE_DIR="$sparse_b" GDAY_VAR="$bvar" GDAY_PLUGIN_DIR="$pdir" "$gday" --brief 2>/dev/null) || true
+full=$(GDAY_MOTD_STYLE=full GDAY_FIXTURE_DIR="$sparse_b" GDAY_VAR="$bvar" GDAY_PLUGIN_DIR="$pdir" "$gday" 2>/dev/null) || true
+if grep -qF 'plugin needs attention' <<< "$out" && ! grep -qF 'informational only' <<< "$out" \
+   && grep -qF 'informational only' <<< "$full" && ! grep -qF 'All clear' <<< "$out"; then
+  ok "brief/plugin-glyph-rule"
+else
+  fail "brief/plugin-glyph-rule"
+fi
+
+# --write-motd: brief to the motd path, full to report.txt; --full reads it.
+motd="$bvar/motd"
+GDAY_FIXTURE_DIR="$sparse_b" GDAY_VAR="$bvar" GDAY_MOTD="$motd" "$gday" --write-motd 2>/dev/null || true
+if grep -qF 'gday --full for details' "$motd" 2>/dev/null && ! grep -qF 'DISK USAGE' "$motd" \
+   && grep -qF 'DISK USAGE' "$bvar/report.txt" 2>/dev/null; then
+  ok "write-motd/brief-motd-full-report"
+else
+  fail "write-motd/brief-motd-full-report"
+fi
+perm=$(stat -c %a "$bvar/report.txt" 2>/dev/null || true)
+if [[ $perm == 644 ]]; then ok "write-motd/report-0644"; else fail "write-motd/report-0644 (got ${perm:-none})"; fi
+out=$(GDAY_FIXTURE_DIR="$sparse_b" GDAY_VAR="$bvar" "$gday" --full 2>/dev/null) || true
+if [[ $out == "$(cat "$bvar/report.txt")" ]]; then
+  ok "full/prints-saved-report"
+else
+  fail "full/prints-saved-report"
+fi
+rm -f "$bvar/report.txt"
+out=$(GDAY_FIXTURE_DIR="$sparse_b" GDAY_VAR="$bvar" "$gday" --full 2>/dev/null) || true
+if grep -qF 'DISK USAGE' <<< "$out"; then ok "full/live-fallback-without-report"
+else fail "full/live-fallback-without-report"; fi
+
+# GDAY_MOTD_STYLE=full (via config) puts the full report in the motd.
+printf 'GDAY_MOTD_STYLE=full\n' > "$bvar/conf"
+GDAY_CONF="$bvar/conf" GDAY_FIXTURE_DIR="$sparse_b" GDAY_VAR="$bvar" GDAY_MOTD="$motd" \
+  "$gday" --write-motd 2>/dev/null || true
+if grep -qF 'DISK USAGE' "$motd"; then ok "write-motd/style-full"; else fail "write-motd/style-full"; fi
+
+# Invalid style warns and falls back to brief (§13: never abort).
+printf 'GDAY_MOTD_STYLE=verbose\n' > "$bvar/conf"
+err=$(GDAY_CONF="$bvar/conf" GDAY_FIXTURE_DIR="$sparse_b" GDAY_VAR="$bvar" GDAY_MOTD="$motd" \
+  "$gday" --write-motd 2>&1 >/dev/null) || true
+if grep -qF 'invalid GDAY_MOTD_STYLE' <<< "$err" && grep -qF 'gday --full for details' "$motd"; then
+  ok "config/invalid-style-falls-back-to-brief"
+else
+  fail "config/invalid-style-falls-back-to-brief"
+fi
+# Failed-unit hints: full lists every unit + all pointers; brief keeps one.
+fdir2=$(mktemp -d); cp "$sparse_b"/* "$fdir2/"
+printf '● fwupd-refresh.service loaded failed failed Refresh fwupd metadata\n' > "$fdir2/systemctl-failed"
+full=$(GDAY_MOTD_STYLE=full GDAY_FIXTURE_DIR="$fdir2" GDAY_VAR="$bvar" "$gday" 2>/dev/null) || true
+out=$(GDAY_FIXTURE_DIR="$fdir2" GDAY_VAR="$bvar" "$gday" --brief 2>/dev/null) || true
+if grep -qF '→ systemctl status fwupd-refresh.service' <<< "$full" \
+   && grep -qF '→ journalctl -b -u fwupd-refresh.service' <<< "$full" \
+   && ! grep -qF 'systemctl --failed' <<< "$full" \
+   && [[ $(grep -c '→' <<< "$out") -eq 1 ]] && grep -qF '→ systemctl status fwupd-refresh.service' <<< "$out"; then
+  ok "failed-units/one-unit-hints"
+else
+  fail "failed-units/one-unit-hints"
+fi
+printf '%s\n' '● casper-md5check.service loaded failed failed casper-md5check Verify Live ISO checksums' \
+  '● geoipupdate.service loaded failed failed Weekly GeoIP update' \
+  '● systemd-networkd-wait-online.service loaded failed failed Wait for Network to be Configured' \
+  > "$fdir2/systemctl-failed"
+full=$(GDAY_MOTD_STYLE=full GDAY_FIXTURE_DIR="$fdir2" GDAY_VAR="$bvar" "$gday" 2>/dev/null) || true
+out=$(GDAY_FIXTURE_DIR="$fdir2" GDAY_VAR="$bvar" "$gday" --brief 2>/dev/null) || true
+if grep -qF '3 failed units' <<< "$full" && grep -qF 'casper-md5check.service' <<< "$full" \
+   && grep -qF 'systemd-networkd-wait-online.service' <<< "$full" \
+   && grep -qF '→ systemctl --failed' <<< "$full" \
+   && grep -qF '→ systemctl status <unit>' <<< "$full" \
+   && grep -qF '→ journalctl -b -u <unit>' <<< "$full"; then
+  ok "failed-units/full-lists-all-and-hints"
+else
+  fail "failed-units/full-lists-all-and-hints"
+fi
+if [[ $(grep -c '→' <<< "$out") -eq 1 ]] && grep -qF '→ systemctl --failed' <<< "$out" \
+   && ! grep -qF 'casper-md5check' <<< "$out"; then
+  ok "failed-units/brief-one-pointer"
+else
+  fail "failed-units/brief-one-pointer"
+fi
+wide=$( { printf '%s\n' "$full"; printf '%s\n' "$out"; } | awk 'length($0) > 80' | wc -l)
+if (( wide == 0 )); then ok "failed-units/width-80"; else fail "failed-units/width-80 ($wide wide lines)"; fi
+
+# Alerts keep their docref pointer in brief (one → per record, unchanged).
+adir="$bvar/alerts.d"; mkdir -p "$adir"; chmod 0755 "$adir"
+printf '# gday-alerts v1\nFAIL\tnightly-job\tdid not run\tRUNBOOK.md#nightly\nWARN\tother-job\tslow\tRUNBOOK.md#other\n' \
+  > "$adir/demo.alerts"; chmod 0644 "$adir/demo.alerts"
+out=$(GDAY_ALERTS_DIR="$adir" GDAY_FIXTURE_DIR="$sparse_b" GDAY_VAR="$bvar" "$gday" --brief 2>/dev/null) || true
+if grep -qF '→ RUNBOOK.md#nightly' <<< "$out" && grep -qF '→ RUNBOOK.md#other' <<< "$out"; then
+  ok "brief/alerts-keep-docref-per-record"
+else
+  fail "brief/alerts-keep-docref-per-record"
+fi
+rm -rf "$fdir2" "$adir"
+
+# Logged in: logind reachable but no sessions ⇒ "none"; unreachable ⇒ row omitted.
+lfx=$(mktemp -d); cp "$sparse_b"/* "$lfx/"; : > "$lfx/loginctl-sessions"
+out=$(GDAY_FIXTURE_DIR="$lfx" GDAY_VAR="$bvar" "$gday" --brief 2>/dev/null) || true
+if grep -qE '^ +Logged in +none$' <<< "$out"; then ok "logged-in/none"; else fail "logged-in/none"; fi
+out=$(GDAY_FIXTURE_DIR="$sparse_b" GDAY_VAR="$bvar" "$gday" --brief 2>/dev/null) || true
+if ! grep -qF 'Logged in' <<< "$out"; then ok "logged-in/omitted-without-logind"; else fail "logged-in/omitted-without-logind"; fi
+rm -rf "$lfx"
+
+# Bare `gday` previews the configured style: brief by default.
+out=$(GDAY_FIXTURE_DIR="$sparse_b" GDAY_VAR="$bvar" "$gday" 2>/dev/null) || true
+if grep -qF 'gday --full for details' <<< "$out" && ! grep -qF 'DISK USAGE' <<< "$out"; then
+  ok "bare/previews-brief-by-default"
+else
+  fail "bare/previews-brief-by-default"
+fi
+out=$(GDAY_MOTD_STYLE=full GDAY_FIXTURE_DIR="$sparse_b" GDAY_VAR="$bvar" "$gday" 2>/dev/null) || true
+if grep -qF 'DISK USAGE' <<< "$out"; then
+  ok "bare/previews-full-when-style-full"
+else
+  fail "bare/previews-full-when-style-full"
+fi
+rm -rf "$bvar" "$sparse_b"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo

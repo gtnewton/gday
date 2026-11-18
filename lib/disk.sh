@@ -20,30 +20,31 @@ disk::_mount_allowed() {
   local target=$1 pat
   if [[ -n ${GDAY_DISK_INCLUDE:-} ]]; then
     for pat in $GDAY_DISK_INCLUDE; do
-      # shellcheck disable=SC2254
+      # shellcheck disable=SC2053
       [[ $target == $pat ]] && return 0
     done
     return 1
   fi
   if [[ -n ${GDAY_DISK_EXCLUDE:-} ]]; then
     for pat in $GDAY_DISK_EXCLUDE; do
-      # shellcheck disable=SC2254
+      # shellcheck disable=SC2053
       [[ $target == $pat ]] && return 1
     done
   fi
   return 0
 }
 
-# gday::disk_section — assemble DISK USAGE.
+# disk::mounts — one TSV line per reportable mount: target, pct, used KiB,
+# size KiB. The single source of mount data for both the full DISK USAGE
+# section and brief mode's over-threshold lines, so the filtering rules
+# (pseudo fs, loop, de-dup, include/exclude) cannot drift between them.
 # Consumes GNU `df --output`; fields: source fstype size(KiB) used(KiB) pcent target.
-gday::disk_section() {
-  render::header '💽' 'DISK USAGE'
+disk::mounts() {
   local out
   out=$(gday::probe df df --output=source,fstype,size,used,pcent,target)
   [[ -n $out ]] || return 0
 
-  local line src fs size used pcent target seen=' ' bar pct human_used human_size
-  local first=1
+  local line src fs size used pcent target seen=' ' pct
   while IFS= read -r line; do
     [[ $line == /* || $line == */* ]] || continue   # skip header / blanks
     # shellcheck disable=SC2086
@@ -59,11 +60,18 @@ gday::disk_section() {
     disk::_mount_allowed "$target" || continue
     pct=${pcent%\%}
     [[ $pct =~ ^[0-9]+$ ]] || pct=0
-    bar=$(render::bar "$pct")
-    human_used=$(render::hkib "$used")
-    human_size=$(render::hkib "$size")
-    render::row "$target" "$(printf '%s %3d%%  %s / %s' "$bar" "$pct" "$human_used" "$human_size")"
-    first=0
+    printf '%s\t%s\t%s\t%s\n' "$target" "$pct" "$used" "$size"
   done <<< "$out"
-  [[ $first -eq 0 ]] || return 0
+}
+
+# gday::disk_section — assemble DISK USAGE.
+gday::disk_section() {
+  render::header '💽' 'DISK USAGE'
+  local target pct used size bar
+  while IFS=$'\t' read -r target pct used size; do
+    [[ -n $target ]] || continue
+    bar=$(render::bar "$pct")
+    render::row "$target" "$(printf '%s %3d%%  %s / %s' "$bar" "$pct" \
+      "$(render::hkib "$used")" "$(render::hkib "$size")")"
+  done < <(disk::mounts)
 }
