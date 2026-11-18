@@ -84,7 +84,7 @@ hw::mainboard() {
 
 # hw::bios — BIOS row from `dmidecode -t 0`: vendor, version, release date.
 # Added for the server case (BIOS/firmware provenance matters more on a
-# headless box than a desktop), not for field-for-field parity with 00-hcmc.
+# headless box than a desktop), not for field-for-field parity with the predecessor banner script.
 # Same degradation as System/Mainboard: an unprivileged run typically gets a
 # permission-denied dmidecode, which gday::probe already turns into "" (§5).
 hw::bios() {

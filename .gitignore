@@ -10,5 +10,8 @@ var/
 test/capture-*/
 test/capture-*.tar.gz
 
-# Pasted real guava run output — contains real email addresses and hostnames.
-/guava-morning-output
+# Local-only project notes: planning history and session state describe
+# internal infrastructure and stay off the public repo (2026-11-18).
+/planning/
+/STATE.md
+/FEATURE_REQUEST.md

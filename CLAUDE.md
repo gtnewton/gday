@@ -179,7 +179,7 @@ Presentation is fixed so the implementation cannot drift.
   four; a login banner long enough to scroll is how motds
   end up `chmod -x`'d by their own users. Raised 45 → 60 on 2026-11-18: after
   NETWORK landed, the default 7-section layout on a real machine is ~55 lines,
-  so 45 fired on every 5-min refresh (27 journal lines/day on figue (work)) —
+  so 45 fired on every 5-min refresh (27 journal lines/day on the dev machine) —
   a warning that always fires is noise and breaks §14's silent-on-success.
 - **Section headers:** one space, emoji, two spaces, upper-case label, one
   space, then a box-drawing rule (`─`) to column 80.
@@ -252,7 +252,7 @@ the invocation.
 
 ### Banner (static)
 Render at static-refresh into `banner.txt` from `hostname -s`. Framed in
-the old upyeros/`00-hcmc` style (Greg, 2026-11-18):
+the old upyeros banner style (Greg, 2026-11-18):
 
 ```
 ================================================================================

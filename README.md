@@ -23,7 +23,7 @@ needs attention (or `✅ All clear`):
        Logged in    alice, greg
 
        ⚠️  netbootbuild: job not scheduled on this box
-                    → GUAVA-RUNBOOK.md#netbootbuild
+                    → RUNBOOK.md#netbootbuild
 
 ────────────────────────────────────────────────────────────────────────────────
 g’day v0.1.0 · generated 2026-06-28 08:30 · gday --full for details
@@ -73,7 +73,7 @@ to make it the login banner instead.
        ✅  No failed units
        ✅  SMART healthy (2 disks)
        ⚠️  netbootbuild: job not scheduled on this box
-                    → GUAVA-RUNBOOK.md#netbootbuild
+                    → RUNBOOK.md#netbootbuild
 
  📦  EXPLICITLY INSTALLED ──────────────────────────────────────────────────────
        Count        355 packages manually installed
@@ -169,7 +169,7 @@ GDAY_ALERTS_MAX_ROWS=8
 
 # Producers that MUST report — missing/stale/rejected each get their own
 # warning line instead of silently vanishing (default: none)
-GDAY_ALERTS_EXPECT='guava-morning-check'
+GDAY_ALERTS_EXPECT='nightly-check'
 ```
 
 Cadences (static, updates, refresh intervals) live in the systemd `.timer`
@@ -232,11 +232,11 @@ a `*.alerts` file to `/var/lib/gday/alerts.d/`:
 
 ```
 # gday-alerts v1
-@ source=guava-morning-check
+@ source=nightly-check
 @ generated=2026-09-17T13:14:09-07:00
 @ expires=26h
-FAIL	unattended-upgrades	u-u has never run on this box	GUAVA-RUNBOOK.md#unattended-upgrades
-WARN	netbootbuild	job not scheduled on this box	GUAVA-RUNBOOK.md#netbootbuild
+FAIL	unattended-upgrades	u-u has never run on this box	RUNBOOK.md#unattended-upgrades
+WARN	netbootbuild	job not scheduled on this box	RUNBOOK.md#netbootbuild
 ```
 
 One producer per file (fields are tab-separated); no `PASS` rows — the

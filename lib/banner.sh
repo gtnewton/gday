@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # banner.sh — top-of-MOTD hostname banner + subtitle (CLAUDE.md §11). Static
 # tier: rendered once into banner.txt. Default art is the hostname in the
-# ANSI Shadow FIGfont (the old upyeros/00-hcmc look), drawn by a built-in
+# ANSI Shadow FIGfont (the old upyeros banner look), drawn by a built-in
 # renderer from lib/fonts/ansi-shadow.flf — figlet is not needed for it.
 # figlet/toilet stay refresh-time optional (§2.6), used only when
 # GDAY_FIGLET_FONT is set or the name is too wide. Never fails the assembly.
@@ -222,7 +222,7 @@ banner::_subtitle() {
 }
 
 # banner::_titled_rule [text] — a full-width '=' rule; with <text>, centred
-# in it as "==== text ====" (the old upyeros/00-hcmc frame). Text too long
+# in it as "==== text ====" (the old upyeros banner frame). Text too long
 # for at least "== " each side is truncated with "…".
 banner::_titled_rule() {
   local text=${1:-} n left right max=$(( GDAY_WIDTH - 6 ))

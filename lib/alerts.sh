@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # alerts.sh — external health-check consumer (CLAUDE.md §11/§12,
 # planning/alerts-section.md). Assemble tier. Renders non-PASS rows from
-# `*.alerts` files dropped by producers gday does not itself run (guava's
-# guava-morning-check.sh is the motivating case) into STATUS, between
+# `*.alerts` files dropped by producers gday does not itself run (a server's
+# nightly-job checker is the motivating case) into STATUS, between
 # status::disks and status::plugins.
 #
 # Format is `gday-alerts v1`: tab-separated records, never JSON (see

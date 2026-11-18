@@ -270,10 +270,10 @@ banner_var=$(mktemp -d)
 
 # Plain override: content replaces figlet art verbatim.
 banner_plain=$(mktemp)
-printf 'HCMC LAB\nDEPT OF COMPUTING\n' > "$banner_plain"
+printf 'ACME LAB\nDEPT OF COMPUTING\n' > "$banner_plain"
 out_banner=$(env GDAY_FIXTURE_DIR="$here/test/fixtures" GDAY_VAR="$banner_var" \
   GDAY_BANNER_FILE="$banner_plain" "$gday" --section banner 2>/dev/null) || true
-if grep -qF 'HCMC LAB' <<< "$out_banner" && grep -qF 'DEPT OF COMPUTING' <<< "$out_banner"; then
+if grep -qF 'ACME LAB' <<< "$out_banner" && grep -qF 'DEPT OF COMPUTING' <<< "$out_banner"; then
   ok "banner-override/content-used-verbatim"
 else
   fail "banner-override/content-used-verbatim"
@@ -364,14 +364,14 @@ a1=$(mktemp -d); chmod 755 "$a1"
 now_iso=$(date -Iseconds)
 {
   printf '# gday-alerts v1\n@ source=demo-check\n@ generated=%s\n@ expires=26h\n' "$now_iso"
-  printf 'FAIL\tunattended-upgrades\tu-u has never run on this box\tGUAVA-RUNBOOK.md#unattended-upgrades\n'
-  printf 'WARN\tnetbootbuild\tjob not scheduled on this box\tGUAVA-RUNBOOK.md#netbootbuild\n'
+  printf 'FAIL\tunattended-upgrades\tu-u has never run on this box\tRUNBOOK.md#unattended-upgrades\n'
+  printf 'WARN\tnetbootbuild\tjob not scheduled on this box\tRUNBOOK.md#netbootbuild\n'
   printf 'WARN\tnodocref\tno doc for this one\n'
 } > "$a1/demo-check.alerts"
 chmod 644 "$a1/demo-check.alerts"
 alerts_run "$a1"
 if grep -qF 'unattended-upgrades: u-u has never run on this box' <<< "$alerts_run_out" \
-   && grep -qF 'GUAVA-RUNBOOK.md#unattended-upgrades' <<< "$alerts_run_out" \
+   && grep -qF 'RUNBOOK.md#unattended-upgrades' <<< "$alerts_run_out" \
    && grep -qF 'netbootbuild: job not scheduled on this box' <<< "$alerts_run_out" \
    && grep -qF 'nodocref: no doc for this one' <<< "$alerts_run_out"; then
   ok "alerts/basic-fail-warn-nodocref"
@@ -428,8 +428,8 @@ rm -rf "$a3"
 
 # 4. Declared-but-missing producer ⇒ warning line.
 a4=$(mktemp -d); chmod 755 "$a4"   # empty: no .alerts file at all
-alerts_run "$a4" GDAY_ALERTS_EXPECT=guava-morning-check
-if grep -qF 'guava-morning-check: no report file' <<< "$alerts_run_out"; then
+alerts_run "$a4" GDAY_ALERTS_EXPECT=nightly-check
+if grep -qF 'nightly-check: no report file' <<< "$alerts_run_out"; then
   ok "alerts/declared-missing-producer-warns"
 else
   fail "alerts/declared-missing-producer-warns"
@@ -455,11 +455,11 @@ rm -rf "$a5"
 # records suppressed, reason on stderr — never in the banner (§4.3's split;
 # a test that only covers case 5 would let the regression back in).
 a6=$(mktemp -d); chmod 755 "$a6"
-printf '# gday-alerts v1\n@ source=guava-morning-check\n@ generated=%s\nFAIL\tx\ty\n' "$now_iso" \
-  > "$a6/guava-morning-check.alerts"
-chmod 664 "$a6/guava-morning-check.alerts"
-alerts_run "$a6" GDAY_ALERTS_EXPECT=guava-morning-check
-if grep -qF 'guava-morning-check: report file unusable' <<< "$alerts_run_out" \
+printf '# gday-alerts v1\n@ source=nightly-check\n@ generated=%s\nFAIL\tx\ty\n' "$now_iso" \
+  > "$a6/nightly-check.alerts"
+chmod 664 "$a6/nightly-check.alerts"
+alerts_run "$a6" GDAY_ALERTS_EXPECT=nightly-check
+if grep -qF 'nightly-check: report file unusable' <<< "$alerts_run_out" \
    && ! grep -qF 'FAIL' <<< "$alerts_run_out" \
    && ! grep -q 'mode\|owner\|permission' <<< "$alerts_run_out" \
    && grep -qi 'rejected' <<< "$alerts_run_err"; then
@@ -623,7 +623,7 @@ rm -rf "$lh"
 # The built-in renderer must match real figlet for the same font (skip if absent).
 if command -v figlet >/dev/null 2>&1; then
   mism=0
-  for t in HCMC FIGUE LAB-PC-07 0123456789 ABCDEFGHIJ KLMNOPQRS TUVWXYZ; do
+  for t in ACME LABPC LAB-PC-07 0123456789 ABCDEFGHIJ KLMNOPQRS TUVWXYZ; do
     mine=$(bash -c 'source "$1/lib/render.sh"; source "$1/lib/banner.sh"; banner::_figrender "$1/lib/fonts/ansi-shadow.flf" "$2"' _ "$here" "$t")
     ref=$(figlet -w 400 -f "$here/lib/fonts/ansi-shadow.flf" "$t" | sed 's/ *$//' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}')
     [[ $mine == "$ref" ]] || mism=$(( mism + 1 ))

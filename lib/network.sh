@@ -13,7 +13,7 @@ GDAY_NETWORK_SH=1
 #      route table's own order) from `ip -4 route show default`.
 #   3. Otherwise "" — the caller omits the whole section rather than guess.
 #
-# Deliberately NOT `ls /sys/class/net | awk '! /wl|lo/'` (00-hcmc's
+# Deliberately NOT `ls /sys/class/net | awk '! /wl|lo/'` (the predecessor banner script's
 # approach): that concatenates every interface name into one variable on any
 # machine with docker0/virbr0/a bridge.
 network::_iface() {
