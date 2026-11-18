@@ -121,7 +121,7 @@ for fdir in "${fixture_dirs[@]}"; do
     run_section "banner/hostname" "$fdir" -- "$hostname_val"
   fi
   if [[ -r $fdir/figlet ]]; then
-    run_section "banner/figlet-art" "$fdir" -- "$(head -1 "$fdir/figlet")"
+    run_section "banner/figlet-art" "$fdir" GDAY_FIGLET_FONT=standard -- "$(head -1 "$fdir/figlet" | sed 's/ *$//')"
   fi
 
   # ── Hardware ─────────────────────────────────────────────────────────────
@@ -585,6 +585,52 @@ if grep -qF '▕' <<< "$out"; then
 else
   fail "degraded/disk-bars-from-sparse-fixture"
 fi
+
+# ── Banner: built-in ANSI Shadow + '=' frame ─────────────────────────────────
+hdr "banner (ANSI Shadow frame)"
+bv=$(mktemp -d)
+out=$(GDAY_FIXTURE_DIR="$here/test/fixtures" GDAY_VAR="$bv" "$gday" --section banner 2>/dev/null) || true
+rule80=$(printf '=%.0s' $(seq 1 80))
+first=$(head -1 <<< "$out"); last=$(tail -1 <<< "$out")
+if [[ $first == "$rule80" ]] && grep -qF '███████╗' <<< "$out"; then
+  ok "banner/top-rule-and-ansi-shadow-art"
+else
+  fail "banner/top-rule-and-ansi-shadow-art"
+fi
+if [[ $last =~ ^=+\ skylab\ ·\ .+\ =+$ ]] && (( $(LC_ALL=C.UTF-8 awk '{print length}' <<< "$last") == 80 )) \
+   && ! grep -qiE 'wayland|x11' <<< "$last"; then
+  ok "banner/titled-rule-80-no-session"
+else
+  fail "banner/titled-rule-80-no-session: «$last»"
+fi
+out=$(GDAY_FIXTURE_DIR="$here/test/fixtures" GDAY_VAR="$bv" GDAY_BANNER_SUBTITLE=0 "$gday" --section banner 2>/dev/null) || true
+if [[ $(tail -1 <<< "$out") == "$rule80" ]]; then
+  ok "banner/subtitle-off-plain-rule"
+else
+  fail "banner/subtitle-off-plain-rule"
+fi
+# A name too wide for ANSI Shadow falls back; nothing exceeds 80 columns.
+lh=$(mktemp -d); cp "$here/test/fixtures/os-release" "$lh/"
+printf 'averyveryverylonghostname\n' > "$lh/hostname"
+out=$(GDAY_FIXTURE_DIR="$lh" GDAY_VAR="$bv" "$gday" --section banner 2>/dev/null) || true
+if ! grep -qF '██' <<< "$out" && [[ $(LC_ALL=C.UTF-8 awk 'length > 80' <<< "$out" | wc -l) -eq 0 ]] \
+   && grep -qF 'averyveryverylonghostname' <<< "$out"; then
+  ok "banner/too-wide-falls-back"
+else
+  fail "banner/too-wide-falls-back"
+fi
+rm -rf "$lh"
+# The built-in renderer must match real figlet for the same font (skip if absent).
+if command -v figlet >/dev/null 2>&1; then
+  mism=0
+  for t in HCMC FIGUE LAB-PC-07 0123456789 ABCDEFGHIJ KLMNOPQRS TUVWXYZ; do
+    mine=$(bash -c 'source "$1/lib/render.sh"; source "$1/lib/banner.sh"; banner::_figrender "$1/lib/fonts/ansi-shadow.flf" "$2"' _ "$here" "$t")
+    ref=$(figlet -w 400 -f "$here/lib/fonts/ansi-shadow.flf" "$t" | sed 's/ *$//' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}')
+    [[ $mine == "$ref" ]] || mism=$(( mism + 1 ))
+  done
+  if (( mism == 0 )); then ok "banner/renderer-matches-figlet"; else fail "banner/renderer-matches-figlet ($mism)"; fi
+fi
+rm -rf "$bv"
 
 # ── Brief mode (planning/brief-mode-and-package-versions.md §1) ──────────────
 hdr "brief mode"

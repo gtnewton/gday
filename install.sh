@@ -53,6 +53,13 @@ mkdir -p "$GDAY_LIB_DIR"
 for lib in "$SCRIPT_DIR/lib/"*.sh; do
   install_file "$lib" "$GDAY_LIB_DIR/$(basename "$lib")" 0644
 done
+# Banner font (lib/banner.sh's built-in renderer). Directory mode explicit,
+# not umask-derived (§20).
+install -d -m 0755 -o root -g root -- "$GDAY_LIB_DIR/fonts"
+for font in "$SCRIPT_DIR/lib/fonts/"*.flf; do
+  [[ -e $font ]] || continue
+  install_file "$font" "$GDAY_LIB_DIR/fonts/$(basename "$font")" 0644
+done
 
 # ── Config ───────────────────────────────────────────────────────────────────
 # Explicit ownership/mode rather than relying on umask (§17) — status.d below

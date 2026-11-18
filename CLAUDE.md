@@ -34,7 +34,8 @@ Settled. Do not relitigate during the build.
 4. **Host-specific extras are plugins** in `/etc/gday/status.d/`, never core.
 5. **Graceful degradation without root** is a first-class requirement (§5).
 6. **figlet is a refresh-time optional dependency only**, never required at
-   login.
+   login. Since 2026-11-18 it isn't needed for the default banner at all
+   (built-in ANSI Shadow renderer, §11).
 7. **Fixed render width of 80 columns.** The timer has no attached tty, so
    per-login width adaptation is impossible by construction (§9). This is a
    constraint, not a deficiency.
@@ -250,10 +251,30 @@ it**; elsewhere the behaviour is specified and the implementation MAY choose
 the invocation.
 
 ### Banner (static)
-Render at static-refresh into `banner.txt` from `hostname -s`. Use
-`figlet -f standard` if figlet or toilet is present; otherwise a plain bordered
-hostname fallback. Subtitle: `<host> · <PRETTY_NAME> · <DE+version · session>`
-(drop DE clause if headless).
+Render at static-refresh into `banner.txt` from `hostname -s`. Framed in
+the old upyeros/`00-hcmc` style (Greg, 2026-11-18):
+
+```
+================================================================================
+<art, centred>
+=================== <host> · <PRETTY_NAME> · <DE+version> ======================
+```
+
+- Art: the hostname upper-cased in **ANSI Shadow**, the FIGfont the old
+  banner used, drawn by a built-in renderer (`banner::_figrender`, awk,
+  horizontal fitting) from the shipped `lib/fonts/ansi-shadow.flf` — no
+  figlet needed. Byte-oriented so mawk and gawk agree; a test checks it
+  against real `figlet` output when figlet is present. The font's author
+  is unrecorded (TheDraw-era ANSI art via patorjk's collection); the file
+  ships unmodified with its header.
+- Order: `GDAY_BANNER_FILE` override → figlet/toilet in `GDAY_FIGLET_FONT`
+  **only if that key is set** (explicit opt-in) → ANSI Shadow → figlet
+  standard (a name too wide for ANSI Shadow, ≳10 chars) → bordered box.
+  Everything but the override is centred by character width.
+- Subtitle sits inside the bottom rule; the seat0 session type
+  (wayland/x11) is no longer shown there — it stays in OS → Desktop. Drop
+  the DE clause if headless. Too long ⇒ truncated with `…`.
+  `GDAY_BANNER_SUBTITLE=0` ⇒ a plain `=` rule.
 
 **Override hook**, two knobs, both `gday.conf` keys:
 - `GDAY_BANNER_FILE=/etc/gday/banner.txt` — when set and readable, its
