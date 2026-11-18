@@ -11,7 +11,7 @@ set -uo pipefail
 
 SNAPRAID_LOG=${SNAPRAID_LOG:-/var/log/snapraid.log}
 
-row() { printf '   %-12s %s\n' "$1" "$2"; }
+row() { printf '       %-12s %s\n' "$1" "$2"; }
 
 [[ -r $SNAPRAID_LOG ]] || exit 0
 

@@ -10,7 +10,7 @@ readonly GDAY_VERSION='0.1.0-dev'
 # g'day never truncates a real section to fit. Assemble warns to stderr once
 # per run when exceeded; a login banner long enough to scroll tends to get
 # `chmod -x`'d by its own users.
-readonly GDAY_LENGTH_BUDGET=45
+readonly GDAY_LENGTH_BUDGET=60
 
 # --- path resolution: dev tree first, installed layout second ---------------
 gday::_resolve_lib() {
@@ -45,7 +45,7 @@ gday::_load_conf() {
   # regardless of whether a conf file was found, so a value pre-set in the
   # environment (e.g. by tests) gets the same validation as one from the file.
   local v val
-  for v in GDAY_BAR_WIDTH GDAY_PKG_INLINE_N GDAY_ALERTS_MAX_ROWS; do
+  for v in GDAY_BAR_WIDTH GDAY_ALERTS_MAX_ROWS; do
     val=${!v:-}
     if [[ -n $val && ! $val =~ ^[0-9]+$ ]]; then
       printf 'gday: warning: invalid %s=%q in %s; using default\n' "$v" "$val" "$conf" >&2
@@ -154,10 +154,12 @@ gday::assemble() {
   )
 
   # §9 length budget: a soft, non-blocking warning (§5 — never abort on a
-  # cosmetic threshold, only on a failed requested operation).
+  # cosmetic threshold, only on a failed requested operation). Dev-time only:
+  # emitted when stderr is a terminal, so the timers (stderr → journal) stay
+  # silent per §14 — nobody can act on it from the journal every 5 min.
   local lines
   lines=$(wc -l <<< "$body")
-  if (( lines > GDAY_LENGTH_BUDGET )); then
+  if [[ -t 2 ]] && (( lines > GDAY_LENGTH_BUDGET )); then
     printf 'gday: warning: assembled output is %d lines (budget %d); consider trimming GDAY_SECTIONS\n' \
       "$lines" "$GDAY_LENGTH_BUDGET" >&2
   fi

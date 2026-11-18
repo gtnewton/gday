@@ -13,7 +13,7 @@ REPO=''               # e.g. /mnt/backup or sftp:host:/backup
 PASSWORD_FILE=''      # path to restic password file
 
 # Row helper matching the §9 alignment (label column = 12 chars).
-row() { printf '   %-12s %s\n' "$1" "$2"; }
+row() { printf '       %-12s %s\n' "$1" "$2"; }
 
 [[ -n $REPO && -n $PASSWORD_FILE ]] || exit 0
 command -v restic >/dev/null 2>&1    || exit 0

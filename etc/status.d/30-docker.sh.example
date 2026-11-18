@@ -12,8 +12,8 @@ set -uo pipefail
 # Containers listed inline before falling back to a "+N more" pointer.
 DOCKER_INLINE_N=${DOCKER_INLINE_N:-8}
 
-row()  { printf '   %-12s %s\n' "$1" "$2"; }
-cont() { printf '   %-12s %s\n' '' "$1"; }
+row()  { printf '       %-12s %s\n' "$1" "$2"; }
+cont() { printf '       %-12s %s\n' '' "$1"; }
 
 # _sanitize <text> — strip control bytes (ANSI/terminal escape sequences)
 # before they reach /etc/motd. Container names/images are admin-controlled,

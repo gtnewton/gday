@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# packages.sh — EXPLICITLY INSTALLED section (CLAUDE.md §11). Static tier writes
-# the full explicit-package list to pkgs.txt; assemble shows count + first N
-# alphabetical + a pointer to the file. PM-only for v1 (no snap/flatpak/etc).
+# packages.sh — EXPLICITLY INSTALLED section (CLAUDE.md §11). Static tier
+# writes the full explicit-package list to pkgs.txt; assemble shows just the
+# count and a pointer to the file — not the names themselves, which on a
+# real machine (hundreds of packages) blew well past a useful line count for
+# a login banner. PM-only for v1 (no snap/flatpak/etc).
 
 [[ -n ${GDAY_PACKAGES_SH:-} ]] && return 0
 GDAY_PACKAGES_SH=1
@@ -55,19 +57,21 @@ gday::packages_build() {
   mv -f "$tmp" "$GDAY_VAR/pkgs.txt"
 }
 
-# gday::packages_section — assemble EXPLICITLY INSTALLED from pkgs.txt.
+# packages::_format_count <n> — thousands-separated integer ("1,000").
+packages::_format_count() {
+  printf '%d' "$1" | sed ':a;s/\B[0-9]\{3\}\>/,&/;ta'
+}
+
+# gday::packages_section — assemble EXPLICITLY INSTALLED from pkgs.txt: a
+# count and a pointer to the full list, not the names themselves (§9 length
+# budget — hundreds of package names wrapped across several lines is exactly
+# the "long enough to scroll" case that budget exists to catch).
 gday::packages_section() {
   render::header '📦' 'EXPLICITLY INSTALLED'
   [[ -r $GDAY_VAR/pkgs.txt ]] || return 0
-  local total n head_list
+  local total total_fmt
   total=$(grep -c '[^[:space:]]' "$GDAY_VAR/pkgs.txt" || printf 0)
-  render::row 'Count' "${total} package$([[ $total -ne 1 ]] && printf s)"
-  (( total > 0 )) || return 0
-  n=${GDAY_PKG_INLINE_N:-12}
-  # First N alphabetical, comma-joined, wrapped within the indent.
-  head_list=$(head -n "$n" "$GDAY_VAR/pkgs.txt" | paste -sd' ' - | sed 's/ /, /g')
-  render::wrap 'Installed' "$head_list"
-  if (( total > n )); then
-    render::cont "… +$(( total - n )) more in ${GDAY_VAR}/pkgs.txt"
-  fi
+  total_fmt=$(packages::_format_count "$total")
+  render::row 'Count' "${total_fmt} package$([[ $total -ne 1 ]] && printf s) manually installed"
+  (( total > 0 )) && render::cont "→ cat ${GDAY_VAR}/pkgs.txt"
 }

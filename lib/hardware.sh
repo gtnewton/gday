@@ -145,10 +145,10 @@ hw::memory() {
     render::row 'Memory' "$val"
   fi
   [[ ${GDAY_ROOT:-0} -eq 1 ]] || return 0
-  local out dimms
+  local out dimms grouped
   out=$(hw::_probe dmidecode-memory dmidecode -t memory)
   [[ -n $out ]] || return 0
-  # One continuation line per populated DIMM: "<size> <type> @ <speed>".
+  # One line per populated DIMM: "<size> <type> @ <speed>".
   dimms=$(awk '
     /^Memory Device/ {sz=""; ty=""; sp=""}
     /^[[:space:]]*Size:/ {s=$0; sub(/^[[:space:]]*Size:[[:space:]]*/,"",s); sz=s}
@@ -157,9 +157,22 @@ hw::memory() {
       if (sz !~ /No Module|Not|Unknown|^$/) printf "%s %s @ %s\n", sz, ty, sp}
   ' <<< "$out")
   [[ -n $dimms ]] || return 0
+  # Collapse identical DIMMs to one "Nx <size> <type> @ <speed>" line instead
+  # of one line per slot — most machines have matched pairs/quads, and a
+  # repeated identical line wastes the §9 length budget for no new
+  # information. Distinct DIMMs (mismatched capacity/speed) still get their
+  # own line, grouped, in first-seen order.
+  grouped=$(awk '
+    { if (!($0 in count)) order[n++] = $0; count[$0]++ }
+    END { for (i = 0; i < n; i++) {
+            line = order[i]
+            if (count[line] > 1) printf "%dx %s\n", count[line], line
+            else print line
+          } }
+  ' <<< "$dimms")
   while IFS= read -r line; do
     [[ -n $line ]] && render::cont "$line"
-  done <<< "$dimms"
+  done <<< "$grouped"
 }
 
 # hw::gpu — one row per VGA/3D/Display device from `lspci`.
@@ -173,6 +186,10 @@ hw::gpu() {
         name=${line#*: }
         name=${name#*: }
         [[ -n $name ]] || continue
+        # Vendor boilerplate costs width and says nothing ("Intel Corporation"
+        # → "Intel"); keeps the common single-GPU line inside the value column.
+        name=${name/ Corporation /' '}
+        name=${name/', Inc. '/' '}
         if [[ $first -eq 1 ]]; then
           render::row 'GPU' "$name"; first=0
         else
@@ -208,13 +225,13 @@ hw::storage() {
     model=${model%"${model##*[![:space:]]}"}
     model=${model:-disk}
     local val="${name}: ${model} (${size})"
+    if [[ ${GDAY_ROOT:-0} -eq 1 && -n $serial && $serial != '-' ]]; then
+      val="${val} · S/N ${serial}"
+    fi
     if [[ $first -eq 1 ]]; then
       render::row 'Storage' "$val"; first=0
     else
       render::cont "$val"
-    fi
-    if [[ ${GDAY_ROOT:-0} -eq 1 && -n $serial && $serial != '-' ]]; then
-      render::cont "  S/N ${serial}"
     fi
   done <<< "$out"
 }

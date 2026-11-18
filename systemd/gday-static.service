@@ -1,6 +1,5 @@
 [Unit]
 Description=g'day static tier — banner, hardware, packages
-Documentation=man:gday(1)
 After=local-fs.target
 
 [Service]

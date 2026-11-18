@@ -18,9 +18,10 @@ no per-login work and no shell-specific hooks.
    System       Acme Systems Workstation Pro (rev 1.0)
    CPU          AMD Ryzen 7 5800X — 8C / 16T
    Memory       31.3 GiB
+                2x 16 GB DDR5 @ 4800 MT/s
    GPU          Intel Corporation UHD Graphics 630
                 AMD/ATI Radeon RX 6700 XT
-   Storage      nvme0n1: Generic NVMe SSD 1TB  (931.5G)
+   Storage      nvme0n1: Generic NVMe SSD 1TB (931.5G) · S/N S5GXNX0R123456
 
  🌐  NETWORK ───────────────────────────────────────────────────────────────────
    Interface    eth0 (up)
@@ -45,8 +46,8 @@ no per-login work and no shell-specific hooks.
                 → GUAVA-RUNBOOK.md#netbootbuild
 
  📦  EXPLICITLY INSTALLED ──────────────────────────────────────────────────────
-   Count        12 packages
-   Installed    build-essential, curl, docker-ce, firefox, git, htop …
+   Count        355 packages manually installed
+                → cat /var/lib/gday/pkgs.txt
 
 ────────────────────────────────────────────────────────────────────────────────
 g'day · generated 2026-06-28 08:30
@@ -126,9 +127,6 @@ GDAY_BAR_WIDTH=30
 
 # Suppress emoji for terminals that render them poorly
 GDAY_EMOJI=0
-
-# Package names shown inline in the MOTD (default: 12)
-GDAY_PKG_INLINE_N=8
 
 # Where external health-check producers drop *.alerts files (default shown)
 GDAY_ALERTS_DIR=/var/lib/gday/alerts.d

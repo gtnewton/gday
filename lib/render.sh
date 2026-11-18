@@ -28,8 +28,13 @@ readonly GDAY_OK='✅'
 readonly GDAY_WARN='⚠️'
 readonly GDAY_FAULT='❌'
 
+# Body indent: deeper than the header label (which starts at column 5 after
+# " <emoji>  "), so section contents visibly nest under their title.
+readonly GDAY_INDENT=7
+readonly GDAY_INDENT_STR='       '
+
 # Column where a row's value begins: indent + label column + one space.
-readonly GDAY_VALUE_COL=16
+readonly GDAY_VALUE_COL=$(( GDAY_INDENT + GDAY_LABEL_WIDTH + 1 ))
 
 # Most section/status emoji occupy two terminal cells. We treat them as such
 # when computing rule fill; a terminal that renders an emoji at a different
@@ -109,23 +114,41 @@ render::sanitize() {
   printf '%s' "$1" | tr -d '\000-\037\177'
 }
 
-# render::row <label> <value> — §9 body row: three-space indent, fixed-width
+# render::_len <text> — length in characters, not bytes. ${#x} counts bytes
+# under a non-UTF-8 locale (plausible under systemd with no LANG), which would
+# make a 24-cell bar (72 bytes) look over-budget and wrap spuriously.
+render::_len() {
+  local LC_ALL=C.UTF-8
+  printf '%d' "${#1}"
+}
+
+# render::_line <label> <value> — emit one body line verbatim (value already
+# sanitized). No width handling; callers that need it go through row/cont.
+render::_line() {
+  printf '%s%-*s %s\n' "$GDAY_INDENT_STR" "$GDAY_LABEL_WIDTH" "$1" "$2"
+}
+
+# render::row <label> <value> — §9 body row: GDAY_INDENT indent, fixed-width
 # label column, value follows. THE shared alignment helper for core + plugins.
+# A value wider than the value column wraps (render::wrap) rather than
+# overflowing 80.
 render::row() {
   local label=$1 value
   value=$(render::sanitize "$2")
-  printf '   %-*s %s\n' "$GDAY_LABEL_WIDTH" "$label" "$value"
+  if (( $(render::_len "$value") > GDAY_WIDTH - GDAY_VALUE_COL )); then
+    render::wrap "$label" "$value"
+  else
+    render::_line "$label" "$value"
+  fi
 }
 
 # render::cont <value> — a continuation line aligned under the value column,
 # for wrapping long values within the indent rather than overflowing (§9).
 render::cont() {
-  local value
-  value=$(render::sanitize "$1")
-  printf '   %-*s %s\n' "$GDAY_LABEL_WIDTH" '' "$value"
+  render::row '' "$1"
 }
 
-# render::status <glyph> <text> — a glyph-led STATUS line: three-space indent,
+# render::status <glyph> <text> — a glyph-led STATUS line: GDAY_INDENT indent,
 # glyph, two spaces, message. The shared form for core status rows and plugins.
 # When GDAY_EMOJI=0, glyphs are replaced with plain ASCII markers.
 render::status() {
@@ -138,27 +161,33 @@ render::status() {
       "$GDAY_FAULT") glyph='[XX]'  ;;
     esac
   fi
-  printf '   %s  %s\n' "$glyph" "$text"
+  printf '%s%s  %s\n' "$GDAY_INDENT_STR" "$glyph" "$text"
 }
 
 # render::wrap <label> <text> — emit <text> as a row under <label>, wrapping on
 # whitespace within the value column so long values never overflow 80 (§9).
+# A single word longer than the budget is emitted on its own line as-is (no
+# mid-word break). Emits via render::_line, never render::row, so there is no
+# row↔wrap recursion.
 render::wrap() {
-  local label=$1 text=$2 budget word line='' first=1
+  local label=$1 text budget word line='' first=1
+  text=$(render::sanitize "$2")
   budget=$(( GDAY_WIDTH - GDAY_VALUE_COL ))
-  for word in $text; do
+  local -a words
+  read -ra words <<< "$text"
+  for word in "${words[@]}"; do
     if [[ -z $line ]]; then
       line=$word
-    elif (( ${#line} + 1 + ${#word} <= budget )); then
+    elif (( $(render::_len "$line $word") <= budget )); then
       line="$line $word"
     else
-      if (( first )); then render::row "$label" "$line"; first=0
-      else render::cont "$line"; fi
+      if (( first )); then render::_line "$label" "$line"; first=0
+      else render::_line '' "$line"; fi
       line=$word
     fi
   done
   if [[ -n $line ]]; then
-    if (( first )); then render::row "$label" "$line"; else render::cont "$line"; fi
+    if (( first )); then render::_line "$label" "$line"; else render::_line '' "$line"; fi
   fi
 }
 

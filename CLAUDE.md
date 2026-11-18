@@ -168,15 +168,20 @@ Presentation is fixed so the implementation cannot drift.
   No per-terminal adaptation (timer has no tty).
 - **Section order (fixed):** banner → HARDWARE → NETWORK → DISK USAGE →
   OPERATING SYSTEM → STATUS → EXPLICITLY INSTALLED → footer.
-- **Total length budget: ~45 lines.** No section is ever truncated to fit —
+- **Total length budget: ~60 lines.** No section is ever truncated to fit —
   this is a warning threshold, not enforcement. `gday::assemble` warns once
-  to stderr (§14) when assembled output exceeds it. Added when the section
+  to stderr (§14) when assembled output exceeds it — **only when stderr is a
+  terminal** (dev/interactive runs); the timer-driven services stay silent. Added when the section
   count grew past four; a login banner long enough to scroll is how motds
-  end up `chmod -x`'d by their own users.
+  end up `chmod -x`'d by their own users. Raised 45 → 60 on 2026-11-18: after
+  NETWORK landed, the default 7-section layout on a real machine is ~55 lines,
+  so 45 fired on every 5-min refresh (27 journal lines/day on figue (work)) —
+  a warning that always fires is noise and breaks §14's silent-on-success.
 - **Section headers:** one space, emoji, two spaces, upper-case label, one
   space, then a box-drawing rule (`─`) to column 80.
-- **Body rows:** three-space indent; label in a fixed-width left column
-  (SHOULD be 12 chars), value follows. `render.sh` MUST expose one alignment
+- **Body rows:** seven-space indent (`GDAY_INDENT` — deeper than the header
+  label at column 5, so contents nest visibly under their title); label in a
+  fixed-width left column (SHOULD be 12 chars), value follows at column 20. `render.sh` MUST expose one alignment
   helper that core sections and plugins share.
 - **Bars:** filled `█`, empty `░`, caps `▕ ▏`. Width from `gday.conf`
   (default 22 cells).
@@ -243,9 +248,9 @@ Exact keys are load-bearing for cross-distro consistency:
 | Mainboard | `dmidecode -t baseboard` | Manufacturer, Product Name, Version (rev for component lookup) |
 | BIOS | `dmidecode -t 0` | Vendor, Version, Release Date. Added for the server case, not lab parity |
 | CPU | `lscpu` | Model name; cores/threads as `4C / 8T` |
-| Memory | `/proc/meminfo` total; `dmidecode -t memory` per-DIMM | total always available; DIMM detail root-only |
+| Memory | `/proc/meminfo` total; `dmidecode -t memory` per-DIMM | total always available; DIMM detail root-only, identical DIMMs collapsed to one `Nx <size> <type> @ <speed>` line rather than one line per slot |
 | GPU | `lspci` VGA/3D/Display class | MAY be multiple |
-| Storage | `lsblk -d -e7 -o NAME,MODEL,SERIAL,SIZE,TYPE`, keep `TYPE=disk` | serials via sysfs; SMART via `smartctl -H` per device (root) |
+| Storage | `lsblk -d -e7 -o NAME,MODEL,SERIAL,SIZE,TYPE`, keep `TYPE=disk` | serials via sysfs (root); rendered inline as `· S/N <serial>` on the same line as model/capacity, not a separate continuation line; SMART via `smartctl -H` per device (root) |
 
 No root ⇒ omit serials, per-DIMM detail, SMART; print the unprivileged subset
 plus one advisory line that running the static tier as root enables serial
@@ -386,9 +391,14 @@ silent state, not a config error), `GDAY_ALERTS_MAX_AGE`, `GDAY_ALERTS_MAX_ROWS`
 `GDAY_ALERTS_EXPECT`.
 
 ### Packages (`lib/packages.sh`, static)
-Full list → `pkgs.txt`; inline shows count + first N alphabetical (N from
-config) + pointer to the file. PM-only — snap/flatpak/pipx/cargo/npm are out of
-scope for v1. Queries are exact (correctness):
+Full list → `pkgs.txt`; the rendered row is a count (thousands-separated) and
+a `→ cat <pkgs.txt path>` pointer — **not** the package names themselves.
+Earlier versions inlined the first N alphabetically, but on any real machine
+(hundreds of packages) that wrapped across several lines, which is exactly
+the "long enough to scroll" case the §9 length budget exists to catch; a
+count + pointer is one line regardless of list size. PM-only —
+snap/flatpak/pipx/cargo/npm are out of scope for v1. Queries are exact
+(correctness):
 
 | PM | Explicit query | Baseline strip |
 |---|---|---|
@@ -418,7 +428,7 @@ Shell-sourced `KEY=value`. **Precedence: compiled defaults < `gday.conf` < CLI
 options.** An invalid value MUST warn (journal/stderr) and fall back to the
 default; it MUST NOT abort (consistent with §1). Keys at minimum: enabled
 sections, banner override file + subtitle toggle, network interface override,
-disk include/exclude globs, bar width, package inline cap N, alerts
+disk include/exclude globs, bar width, alerts
 directory/max-age/max-rows/expect, cadences, emoji/accent toggle.
 
 ## 14. Logging
@@ -445,6 +455,20 @@ directory/max-age/max-rows/expect, cadences, emoji/accent toggle.
 SHOULD be shellcheck-clean. MUST: quote all expansions; use `local`; use
 functions with single responsibilities; `readarray`/`mapfile` for line lists;
 avoid parsing `ls`; avoid needless subshells. MUST NOT use `eval`.
+
+**A bare `TEST && ACTION` (or `(( expr ))`) as a function's last statement,
+called as a plain command, MUST NOT be used when `TEST`/`expr` can
+legitimately be false/zero** — found 2026-09-18 as a real, install-killing
+bug (`install.sh`'s `_cadence_clear`). shellcheck does not catch this.
+Concretely: `f() { [[ -e $1 ]] && rm -f "$1"; }` called as bare `f "$x"`
+propagates the test's false exit status as `f`'s own exit status, which
+`set -e` treats as a failure at the call site — even though the *identical*
+pattern written inline (not inside a function) is exempt, and even though
+`f "$x" || true` or `if f "$x"; then` at the call site would also be fine.
+This fired on every default `gday.conf` (no cadence override is the normal
+case), silently, before any cache file was ever written — no error visible
+short of `bash -x`. Use `if TEST; then ACTION; fi` inside the function
+instead; do not rely on how the function happens to be called elsewhere.
 
 ## 17. Security requirements
 

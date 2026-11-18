@@ -1,6 +1,5 @@
 [Unit]
 Description=g'day static tier timer — runs at boot and daily
-Documentation=man:gday(1)
 
 [Timer]
 # Boot delay: give the system a moment to settle before the expensive probes.

@@ -1,6 +1,5 @@
 [Unit]
 Description=g'day updates tier — pending update count, reboot flag
-Documentation=man:gday(1)
 After=network-online.target
 Wants=network-online.target
 

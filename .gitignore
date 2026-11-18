@@ -9,3 +9,6 @@ var/
 /capture-*.tar.gz
 test/capture-*/
 test/capture-*.tar.gz
+
+# Pasted real guava run output — contains real email addresses and hostnames.
+/guava-morning-output

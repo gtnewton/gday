@@ -1,6 +1,5 @@
 [Unit]
 Description=g'day refresh — assemble /etc/motd from caches
-Documentation=man:gday(1)
 After=local-fs.target
 
 [Service]
